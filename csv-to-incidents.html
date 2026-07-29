@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSV → incidents.json — Conflict Atlas data builder</title>
+<style>
+:root{
+  --void:#070B10; --panel:#0C121A; --panel-2:#111A25; --panel-3:#16212E;
+  --line:#1D2A38; --line-soft:#16202B;
+  --paper:#D6E1EC; --dim:#7C93AB; --dimmer:#4B6076;
+  --h1:#3E7BE8; --h3:#E6C13F; --h5:#E5453B; --ok:#3FB8A0;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--void);color:var(--paper);font-family:var(--sans);
+  min-height:100vh;padding:32px 20px 60px}
+.wrap{max-width:760px;margin:0 auto}
+header{margin-bottom:24px}
+h1{font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;margin:0 0 6px}
+header p{margin:0;color:var(--dim);font-size:13px;line-height:1.6;max-width:56ch}
+header p b{color:var(--paper)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+  padding:20px;margin-bottom:16px}
+.step-lbl{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--dimmer);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.step-lbl .n{width:18px;height:18px;border-radius:50%;background:var(--panel-3);
+  display:inline-flex;align-items:center;justify-content:center;color:var(--dim);font-size:10px}
+
+#drop{
+  border:2px dashed var(--line);border-radius:4px;padding:28px 16px;text-align:center;
+  cursor:pointer;transition:border-color .15s,background .15s;
+}
+#drop:hover,#drop.over{border-color:var(--h1);background:rgba(62,123,232,.06)}
+#drop .big{font-size:13px;color:var(--paper);margin-bottom:4px}
+#drop .small{font-size:11.5px;color:var(--dimmer)}
+#fileInput{display:none}
+#fileChosen{
+  display:none;margin-top:10px;padding:9px 12px;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:3px;font-family:var(--mono);
+  font-size:12px;display:none;align-items:center;gap:8px;justify-content:space-between;
+}
+#fileChosen.on{display:flex}
+#fileChosen .x{color:var(--dimmer);cursor:pointer;font-size:14px;padding:2px 6px}
+#fileChosen .x:hover{color:var(--paper)}
+
+.cfg{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.field input{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:3px;
+  padding:8px 10px;color:var(--paper);font-family:var(--mono);font-size:13px;
+}
+.field input:focus{outline:2px solid var(--h1);outline-offset:1px}
+.field .hint{font-size:10.5px;color:var(--dimmer);line-height:1.4}
+
+button.primary{
+  width:100%;padding:12px;margin-top:16px;border-radius:3px;border:none;
+  background:var(--h1);color:#fff;font-family:var(--mono);font-size:12px;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+}
+button.primary:hover{background:#5590f5}
+button.primary:disabled{background:var(--panel-3);color:var(--dimmer);cursor:not-allowed}
+button.download{background:var(--ok)}
+button.download:hover{background:#4dd0b3}
+
+#log{
+  display:none;font-family:var(--mono);font-size:11.5px;line-height:1.7;
+  background:var(--void);border:1px solid var(--line);border-radius:3px;
+  padding:12px 14px;max-height:280px;overflow-y:auto;white-space:pre-wrap;
+  color:var(--dim);margin-top:14px;
+}
+#log.on{display:block}
+#log .err{color:var(--h5)}
+#log .ok{color:var(--ok)}
+#log .warn{color:var(--h3)}
+
+#result{display:none;margin-top:16px}
+#result.on{display:block}
+.stat-row{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--panel-2);border:1px solid var(--line);border-radius:3px;
+  padding:9px 13px;flex:1;min-width:120px}
+.stat b{display:block;font-family:var(--mono);font-size:16px}
+.stat span{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
+
+.next{font-size:12.5px;line-height:1.7;color:var(--dim);margin-top:14px}
+.next code{background:var(--panel-2);border:1px solid var(--line);border-radius:2px;
+  padding:1px 5px;font-family:var(--mono);font-size:11.5px;color:var(--paper)}
+
+footer{margin-top:20px;font-size:11px;color:var(--dimmer);line-height:1.6}
+footer a{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>CSV → incidents.json</h1>
+    <p>Converts a UCDP conflict-events file into the format <b>Conflict Atlas</b> reads.
+       Runs entirely in this browser tab — nothing is uploaded anywhere, and you don't
+       need Python or any other install. Works offline once the page is open.</p>
+  </header>
+
+  <div class="card">
+    <p class="step-lbl"><span class="n">1</span>Choose your UCDP GED csv file</p>
+    <div id="drop">
+      <div class="big">Drop the .csv file here, or click to browse</div>
+      <div class="small">Download it first from ucdp.uu.se/downloads — the "GED Global" csv</div>
+    </div>
+    <input type="file" id="fileInput" accept=".csv">
+    <div id="fileChosen"><span id="fileChosenName"></span><span class="x" id="fileClear">×</span></div>
+  </div>
+
+  <div class="card">
+    <p class="step-lbl"><span class="n">2</span>Filters <span style="text-transform:none;letter-spacing:0">(the defaults are sensible — change only if you want to)</span></p>
+    <div class="cfg">
+      <div class="field">
+        <label for="yearFrom">Year from</label>
+        <input type="number" id="yearFrom" value="2020" min="1989" max="2030">
+      </div>
+      <div class="field">
+        <label for="yearTo">Year to</label>
+        <input type="number" id="yearTo" value="2025" min="1989" max="2030">
+      </div>
+      <div class="field">
+        <label for="minDeaths">Minimum deaths</label>
+        <input type="number" id="minDeaths" value="10" min="0">
+        <div class="hint">Drops smaller incidents. Lower this if you want more events.</div>
+      </div>
+      <div class="field">
+        <label for="maxEvents">Maximum events</label>
+        <input type="number" id="maxEvents" value="2500" min="50">
+        <div class="hint">Keeps the deadliest N. Above ~2,500 the map gets heavy.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="step-lbl"><span class="n">3</span>Convert</p>
+    <button class="primary" id="goBtn" disabled>Choose a file first</button>
+    <div id="log"></div>
+    <div id="result">
+      <div class="stat-row" id="statRow"></div>
+      <button class="primary download" id="dlBtn">Download incidents.json</button>
+      <p class="next">
+        Move the downloaded file into a folder named <code>data</code> next to
+        <code>conflict-atlas.html</code>, so the path reads <code>data/incidents.json</code>.
+        Then follow Stage 2 of the build guide to put it online.
+      </p>
+    </div>
+  </div>
+
+  <footer>
+    Data: Uppsala Conflict Data Program (UCDP), ucdp.uu.se — credit them wherever you show this.
+    This tool reads the file you choose entirely on your own computer;
+    it is never sent anywhere.
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Inlined on purpose. This file is meant to be opened by double-
+   clicking — no server, no install. Browsers are inconsistent about
+   whether a plain file:// page can load *any* external file via
+   <script src>, even a relative sibling file, depending on browser
+   and version. Rather than depend on that, everything the tool needs
+   lives in this one <script> block. Copy this file anywhere and it
+   still works.
+   ============================================================ */
+
+/* ---- csv_parser.js, inlined ------------------------------------- */
+// RFC4180-ish CSV parser: quoted fields, embedded delimiters, embedded
+// newlines inside quotes, doubled-quote escaping ("" -> "), CRLF or LF.
+// Returns an array of rows, each row an array of strings.
+//
+// Two paths, both producing identical results, chosen for speed:
+//   FAST  — no quote character anywhere in the text. Native split() on
+//           newlines then the delimiter. This is the common case for
+//           straightforward exports and is roughly 15x faster.
+//   CAREFUL — a proper state machine, used whenever a '"' appears
+//           anywhere, because that means at least one field may need
+//           quote-aware handling (embedded delimiters, embedded
+//           newlines, or escaped quotes). It slices at field
+//           boundaries rather than concatenating character by
+//           character, which is the difference between ~130ms and
+//           ~9ms per 1,000 rows.
+function parseCSV(text, delim) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);   // strip BOM
+  return text.includes('"') ? parseCareful(text, delim) : parseFast(text, delim);
+}
+
+function parseFast(text, delim) {
+  const lines = text.split(/\r\n|\r|\n/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines.map(line => line.split(delim));
+}
+
+function parseCareful(text, delim) {
+  const rows = [];
+  let row = [];
+  const n = text.length;
+  let i = 0, fieldStart = 0, inQuotes = false, quotedField = false;
+
+  const pushField = (rawEnd) => {
+    let f = text.slice(fieldStart, rawEnd);
+    if (quotedField){
+      // rawEnd points just before the closing quote in this call's
+      // caller, so f already excludes the surrounding quotes here.
+      f = f.replace(/""/g, '"');
+    }
+    row.push(f);
+    quotedField = false;
+  };
+
+  while (i < n) {
+    if (!inQuotes && text[i] === '"' && i === fieldStart) {
+      inQuotes = true; quotedField = true; i++; fieldStart = i; continue;
+    }
+    if (inQuotes) {
+      if (text[i] === '"') {
+        if (text[i + 1] === '"') { i += 2; continue; }     // escaped quote
+        pushField(i);                                       // closing quote
+        inQuotes = false;
+        i++;
+        // skip to the next delimiter/newline (trailing chars after a
+        // closing quote before the delimiter are not valid CSV but we
+        // tolerate them rather than throw)
+        while (i < n && text[i] !== delim && text[i] !== "\n" && text[i] !== "\r") i++;
+        if (text[i] === delim) { i++; fieldStart = i; continue; }
+        if (text[i] === "\r") { i++; if (text[i] === "\n") i++; rows.push(row); row = []; fieldStart = i; continue; }
+        if (text[i] === "\n") { i++; rows.push(row); row = []; fieldStart = i; continue; }
+        fieldStart = i; continue;
+      }
+      i++; continue;
+    }
+    const c = text[i];
+    if (c === delim) { pushField(i); i++; fieldStart = i; continue; }
+    if (c === "\r") { pushField(i); i++; if (text[i] === "\n") i++; rows.push(row); row = []; fieldStart = i; continue; }
+    if (c === "\n") { pushField(i); i++; rows.push(row); row = []; fieldStart = i; continue; }
+    i++;
+  }
+  if (fieldStart < n || row.length){ pushField(n); rows.push(row); }
+  return rows;
+}
+
+function detectDelimiter(firstLine) {
+  const counts = { ",": 0, ";": 0, "\t": 0, "|": 0 };
+  for (const ch of firstLine) if (ch in counts) counts[ch]++;
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// rows -> array of objects, keyed by lowercased header
+function rowsToObjects(rows) {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => (h || "").trim().toLowerCase());
+  const out = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (row.length === 1 && row[0] === "") continue;   // trailing blank line
+    const obj = {};
+    for (let c = 0; c < header.length; c++) obj[header[c]] = row[c] ?? "";
+    out.push(obj);
+  }
+  return out;
+}
+
+
+/* ---- build_data.js, inlined --------------------------------------- */
+// build_data.js
+// Same logic as build_data.py's normalize()/describe()/assess_quality()/
+// parse_sources(). Kept deliberately parallel, function for function, so
+// the two are easy to compare and keep in sync if UCDP changes its schema.
+// Used by csv-to-incidents.html (browser, no install) and by
+// tests/compare_js_py.py (parity check against the Python version, which
+// is what GitHub Actions runs in Stage 4).
+
+const VIOLENCE_TYPE = { 1: "armed_clash", 2: "armed_clash", 3: "terror_attack" };
+const REQUIRED_COLUMNS = ["date_start", "latitude", "longitude", "best", "type_of_violence", "country"];
+
+function clean(v) {
+  if (v === null || v === undefined) return "";
+  const s = String(v).trim();
+  return ["", "NULL", "NA", "NONE", "-1"].includes(s.toUpperCase()) ? "" : s;
+}
+function toInt(v, def = 0) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : def;
+}
+function toFloat(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseSources(sourceArticle, limit = 4) {
+  const text = clean(sourceArticle);
+  if (!text) return [];
+  const names = [];
+  for (const chunk of text.split("///")) {
+    let outlet = chunk.split(",")[0].trim();
+    outlet = outlet.replace(/\s*\(.*?\)\s*$/, "");
+    if (outlet.length > 2 && outlet.length < 40 && !names.includes(outlet)) names.push(outlet);
+    if (names.length >= limit) break;
+  }
+  return names;
+}
+
+function assessQuality(row) {
+  const best = toInt(row.best);
+  const low = toInt(row.low), high = toInt(row.high, best);
+  const clarity = toInt(row.event_clarity, 1);
+  const wherePrec = toInt(row.where_prec, 1);
+  const spread = (high - low) / Math.max(1, best);
+  if (spread === 0 && clarity === 1 && wherePrec <= 2) return "high";
+  if (spread < 0.5 && wherePrec <= 4) return "medium";
+  return "low";
+}
+
+function describe(row) {
+  const sideA = clean(row.side_a), sideB = clean(row.side_b);
+  const place = clean(row.where_description) || clean(row.where_coordinates);
+  const conflict = clean(row.conflict_name);
+  const deaths = toInt(row.best);
+  const who = sideA && sideB ? `${sideA} and ${sideB}` : (sideA || sideB || "Unidentified armed actors");
+  let sentence = `Recorded violence involving ${who}`;
+  if (place) sentence += ` at ${place}`;
+  sentence += ` — ${deaths.toLocaleString()} death${deaths !== 1 ? "s" : ""} recorded by UCDP.`;
+  if (conflict) sentence += ` Coded under the conflict '${conflict}'.`;
+  return sentence;
+}
+
+function checkColumns(rows) {
+  if (!rows.length) return { ok: false, missing: [], found: [], reason: "empty" };
+  const found = Object.keys(rows[0]);
+  const missing = REQUIRED_COLUMNS.filter(c => !found.includes(c));
+  return { ok: missing.length === 0, missing, found };
+}
+
+// Returns null to mean "skip this row" — same contract as the Python version.
+function normalize(row, cfg) {
+  const lat = toFloat(row.latitude), lon = toFloat(row.longitude);
+  if (lat === null || lon === null) return null;
+
+  const date = clean(row.date_start).slice(0, 10);
+  if (date.length !== 10) return null;
+
+  const year = toInt(date.slice(0, 4));
+  if (year < cfg.yearFrom || year > cfg.yearTo) return null;
+
+  const deaths = toInt(row.best);
+  if (deaths < cfg.minDeaths) return null;
+
+  const vtype = VIOLENCE_TYPE[toInt(row.type_of_violence, 1)] || "armed_clash";
+  const city = clean(row.where_coordinates) || clean(row.adm_1) || clean(row.country);
+  const region = clean(row.adm_1) || clean(row.region) || "—";
+  const dateEnd = clean(row.date_end).slice(0, 10);
+  const ongoing = !!(dateEnd && dateEnd !== date);
+  const tags = [clean(row.conflict_name), clean(row.region), String(year)].filter(Boolean).slice(0, 4);
+
+  return {
+    id: `ucdp-${clean(row.id) || clean(row.relid)}`,
+    date,
+    loc: [city, region, clean(row.country) || "Unknown", Math.round(lat * 10000) / 10000, Math.round(lon * 10000) / 10000],
+    type: vtype,
+    cas: deaths,
+    quality: assessQuality(row),
+    ongoing,
+    desc: describe(row),
+    tags,
+    src: parseSources(row.source_article),
+  };
+}
+
+function guessVersionLabel(filename){
+  // UCDP filenames look like GEDEvent_v26_1.csv — pull the version back out
+  // so the badge and citation match what build_data.py would print.
+  const m = /v(\d+)[._](\d+)/i.exec(filename || "");
+  return m ? `UCDP GED ${m[1]}.${m[2]}` : "UCDP GED (version not detected — check the filename)";
+}
+
+function buildDataset(rawRows, cfg) {
+  const colCheck = checkColumns(rawRows);
+  if (!colCheck.ok) return { error: "missing_columns", ...colCheck };
+
+  const normalized = rawRows.map(r => normalize(r, cfg)).filter(Boolean);
+
+  if (!normalized.length) {
+    const years = [...new Set(rawRows.map(r => clean(r.date_start).slice(0, 4)).filter(y => /^\d{4}$/.test(y)))].sort();
+    const tolls = rawRows.map(r => toInt(r.best));
+    return {
+      error: "no_survivors",
+      yearsPresent: years.length ? [years[0], years[years.length - 1]] : null,
+      maxDeaths: tolls.length ? Math.max(...tolls) : 0,
+      rawCount: rawRows.length,
+    };
+  }
+
+  let incidents = normalized;
+  let cappedAt = null;
+  if (incidents.length > cfg.maxEvents) {
+    incidents = [...incidents].sort((a, b) => b.cas - a.cas).slice(0, cfg.maxEvents);
+    cappedAt = Math.min(...incidents.map(i => i.cas));
+  }
+  incidents.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  const countries = {};
+  for (const i of incidents) countries[i.loc[2]] = (countries[i.loc[2]] || 0) + 1;
+
+  return {
+    error: null,
+    rawCount: rawRows.length,
+    passedCount: normalized.length,
+    cappedAt,
+    payload: {
+      source: guessVersionLabel(cfg.filename),
+      generated: new Date().toISOString(),
+      attribution: "Uppsala Conflict Data Program (UCDP), ucdp.uu.se",
+      filters: { year_from: cfg.yearFrom, year_to: cfg.yearTo, min_deaths: cfg.minDeaths, max_events: cfg.maxEvents },
+      count: incidents.length,
+      incidents,
+    },
+    stats: {
+      dateFrom: incidents[0].date,
+      dateTo: incidents[incidents.length - 1].date,
+      totalDeaths: incidents.reduce((s, i) => s + i.cas, 0),
+      topCountries: Object.entries(countries).sort((a, b) => b[1] - a[1]).slice(0, 5),
+    },
+  };
+}
+
+
+const drop = document.getElementById("drop");
+const fileInput = document.getElementById("fileInput");
+const fileChosen = document.getElementById("fileChosen");
+const fileChosenName = document.getElementById("fileChosenName");
+const fileClear = document.getElementById("fileClear");
+const goBtn = document.getElementById("goBtn");
+const logEl = document.getElementById("log");
+const resultEl = document.getElementById("result");
+const statRow = document.getElementById("statRow");
+const dlBtn = document.getElementById("dlBtn");
+
+let chosenFile = null;
+let lastPayload = null;
+
+function log(msg, cls){
+  logEl.classList.add("on");
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog(){ logEl.innerHTML = ""; logEl.classList.remove("on"); }
+
+function setFile(file){
+  if (!file) return;
+  if (!/\.csv$/i.test(file.name) && !/\.zip$/i.test(file.name)){
+    alert("That doesn't look like a .csv file. If it downloaded as a .zip, unzip it first, then choose the .csv inside.");
+    return;
+  }
+  if (/\.zip$/i.test(file.name)){
+    alert("'" + file.name + "' is a zip archive. Unzip it, then choose the .csv file inside.");
+    return;
+  }
+  chosenFile = file;
+  fileChosenName.textContent = file.name + "  ·  " + (file.size/1_048_576).toFixed(1) + " MB";
+  fileChosen.classList.add("on");
+  goBtn.disabled = false;
+  goBtn.textContent = "Convert";
+  resultEl.classList.remove("on");
+  clearLog();
+}
+
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", e => setFile(e.target.files[0]));
+fileClear.addEventListener("click", e => {
+  e.stopPropagation();
+  chosenFile = null; fileInput.value = "";
+  fileChosen.classList.remove("on");
+  goBtn.disabled = true; goBtn.textContent = "Choose a file first";
+  resultEl.classList.remove("on"); clearLog();
+});
+
+function readFileAsText(file){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error || new Error("Could not read the file"));
+    r.readAsText(file, "utf-8");
+  });
+}
+
+async function convert(){
+  goBtn.disabled = true;
+  goBtn.textContent = "Working…";
+  resultEl.classList.remove("on");
+  clearLog();
+
+  const cfg = {
+    yearFrom: parseInt(document.getElementById("yearFrom").value, 10) || 2020,
+    yearTo:   parseInt(document.getElementById("yearTo").value, 10) || 2025,
+    minDeaths: parseInt(document.getElementById("minDeaths").value, 10) || 0,
+    maxEvents: parseInt(document.getElementById("maxEvents").value, 10) || 2500,
+    filename: chosenFile.name,
+  };
+
+  try {
+    log("Reading " + chosenFile.name + " …");
+    await tick();
+    const text = await readFileAsText(chosenFile);
+
+    log("Parsing rows … (large files can take up to a minute — don't close this tab)");
+    await tick();
+    const firstLine = text.split(/\r?\n/, 1)[0];
+    const delim = detectDelimiter(firstLine);
+    if (delim !== ",") log("  detected '" + delim + "' as the column separator");
+    const rows = parseCSV(text, delim);
+    const objs = rowsToObjects(rows);
+    log("Loaded " + objs.length.toLocaleString() + " raw records.");
+    await tick();
+
+    log("Filtering and building the dataset …");
+    await tick();
+    const result = buildDataset(objs, cfg);
+
+    if (result.error === "missing_columns"){
+      log("ERROR: this file is missing required columns: " + result.missing.join(", "), "err");
+      log("", "");
+      log("Columns actually found:", "warn");
+      result.found.slice(0, 40).forEach(c => log("    " + c));
+      log("", "");
+      log("Likely causes:", "warn");
+      log("  - This isn't the GED event file. You want 'UCDP Georeferenced");
+      log("    Event Dataset (GED) Global', not a country-year or conflict file.");
+      log("  - You picked the wrong file, or an incomplete download.");
+      resetButton();
+      return;
+    }
+
+    if (result.error === "no_survivors"){
+      log("ERROR: no events passed the filters.", "err");
+      if (result.yearsPresent){
+        log("  Years present in the file: " + result.yearsPresent[0] + " to " + result.yearsPresent[1]);
+        log("  Years you asked for:       " + cfg.yearFrom + " to " + cfg.yearTo);
+        if (+result.yearsPresent[1] < cfg.yearFrom || +result.yearsPresent[0] > cfg.yearTo)
+          log("  -> No overlap. Widen 'Year from' / 'Year to' above.", "warn");
+      }
+      log("  Highest death toll in the file: " + result.maxDeaths);
+      log("  Your minimum-deaths setting:    " + cfg.minDeaths);
+      if (result.maxDeaths < cfg.minDeaths)
+        log("  -> Minimum deaths is above every event. Lower it above.", "warn");
+      resetButton();
+      return;
+    }
+
+    log(result.passedCount.toLocaleString() + " passed the filters.", "ok");
+    if (result.cappedAt !== null)
+      log("Capped to the " + cfg.maxEvents.toLocaleString() + " deadliest (below " + result.cappedAt.toLocaleString() + " deaths dropped).");
+
+    const s = result.stats;
+    log("Date range: " + s.dateFrom + " to " + s.dateTo);
+    log("Total deaths: " + s.totalDeaths.toLocaleString());
+    log("Top countries: " + s.topCountries.map(([c,n]) => c + " (" + n + ")").join(", "));
+    log("Done.", "ok");
+
+    lastPayload = result.payload;
+    statRow.innerHTML = [
+      ["Incidents", result.passedCount.toLocaleString()],
+      ["Deaths", s.totalDeaths.toLocaleString()],
+      ["Span", s.dateFrom.slice(0,4) + "–" + s.dateTo.slice(0,4)],
+    ].map(([label,val]) => `<div class="stat"><b>${val}</b><span>${label}</span></div>`).join("");
+    log("Labelled as: " + result.payload.source);
+    resultEl.classList.add("on");
+
+  } catch (err){
+    log("ERROR: " + err.message, "err");
+    log("If this keeps happening, the file may be too large for this browser tab.");
+    log("Try Firefox or Chrome (both handle large files better than Safari), or ask for the Python route instead.");
+  }
+  resetButton();
+}
+
+function resetButton(){ goBtn.disabled = false; goBtn.textContent = "Convert"; }
+function tick(){ return new Promise(r => setTimeout(r, 0)); }   // let the log line paint
+
+goBtn.addEventListener("click", convert);
+
+dlBtn.addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(lastPayload)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "incidents.json";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+</script>
+</body>
+</html>
