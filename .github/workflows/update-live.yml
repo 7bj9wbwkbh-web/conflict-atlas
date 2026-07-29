@@ -1,0 +1,55 @@
+# .github/workflows/update-live.yml
+#
+# Conflict Atlas — Stage 5.2
+# Refreshes data/live.json from GDELT on a schedule.
+#
+# No secret needed. GDELT requires no key, so unlike update-data.yml there is
+# nothing to configure in Settings → Secrets. You still need the "Read and
+# write permissions" setting from Stage 4.2 — if you did Stage 4, it's done.
+
+name: Update live data
+
+on:
+  schedule:
+    # Hourly, on the hour. Start here.
+    # Every 30 min is "*/30 * * * *" — see 5.4 before you do that.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+# Never let two runs overlap and fight over the same file.
+concurrency:
+  group: update-live
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install step. fetch_live.py uses the standard library only.
+
+      - name: Fetch from GDELT
+        run: python fetch_live.py
+
+      - name: Commit only if the data actually changed
+        run: |
+          git config user.name  "conflict-atlas-bot"
+          git config user.email "conflict-atlas-bot@users.noreply.github.com"
+
+          # --quiet exits 0 when nothing changed, 1 when something did.
+          if git diff --quiet -- data/live.json; then
+            echo "No change since the last run. Nothing to commit."
+            exit 0
+          fi
+
+          git add data/live.json
+          git commit -m "Live data refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
