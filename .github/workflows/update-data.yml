@@ -1,0 +1,51 @@
+# .github/workflows/update-data.yml
+#
+# Refreshes data/incidents.json on a schedule and commits the result.
+# Free on public repositories. No server, no credit card.
+#
+# BEFORE THIS WORKS:
+#   1. Put your UCDP token in the repo under
+#      Settings -> Secrets and variables -> Actions -> New repository secret
+#      Name it exactly: UCDP_TOKEN
+#   2. Allow the job to push, under
+#      Settings -> Actions -> General -> Workflow permissions
+#      -> "Read and write permissions" -> Save
+
+name: Update conflict data
+
+on:
+  schedule:
+    # 06:00 UTC every Wednesday. UCDP publishes on a slower cycle than this,
+    # so weekly is plenty. Cron is always UTC.
+    - cron: "0 6 * * 3"
+  workflow_dispatch:        # adds a "Run workflow" button so you can test it
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the dataset
+        env:
+          UCDP_TOKEN: ${{ secrets.UCDP_TOKEN }}
+        run: python build_data.py --api
+
+      - name: Commit the result if it changed
+        run: |
+          git config user.name  "conflict-atlas-bot"
+          git config user.email "actions@github.com"
+          git add data/incidents.json
+          if git diff --staged --quiet; then
+            echo "No change in the data. Nothing to commit."
+          else
+            git commit -m "Update conflict data ($(date -u +%Y-%m-%d))"
+            git push
+          fi
