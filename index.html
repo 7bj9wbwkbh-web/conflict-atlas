@@ -860,7 +860,7 @@ function initMap() {
   map.on('load', () => {
     map.addSource('incidents', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
+      data: { type: 'FeatureCollection', features: getGeoJSONFeatures() },
       cluster: true,
       clusterMaxZoom: 12, // After zoom 12, features are unclustered
       clusterRadius: 52,
@@ -1030,10 +1030,9 @@ function initMap() {
   });
 }
 
-function renderMarkers() {
-  if (!map || !map.isStyleLoaded()) return;
+function getGeoJSONFeatures() {
   const items = visible();
-  const features = items.map(i => ({
+  return items.map(i => ({
     type: 'Feature',
     geometry: { type: 'Point', coordinates: [i.lon, i.lat] },
     properties: {
@@ -1046,9 +1045,13 @@ function renderMarkers() {
       type: i.type
     }
   }));
-  map.getSource('incidents').setData({ type: 'FeatureCollection', features });
-  
-  // Update selected highlight
+}
+
+function renderMarkers() {
+  if (!map || !map.isStyleLoaded()) return;
+  const src = map.getSource('incidents');
+  if (!src) return;
+  src.setData({ type: 'FeatureCollection', features: getGeoJSONFeatures() });
   paintSelection();
 }
 
