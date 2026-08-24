@@ -6,50 +6,69 @@
 # No secret needed. GDELT requires no key, so unlike update-data.yml there is
 # nothing to configure in Settings → Secrets. You still need the "Read and
 # write permissions" setting from Stage 4.2 — if you did Stage 4, it's done.
-
+#
+# 2026-08 FIX — the commit step never actually committed anything
+# `git diff --quiet -- data/live.json` only compares TRACKED files. Since
+# live.json had never been committed before, it was always untracked, and
+# git diff silently reports "no difference" for files it isn't tracking —
+# so every one of this workflow's runs hit the "nothing to commit" branch
+# and exited before ever reaching `git add` / `git commit` / `git push`.
+# The fix: stage the file FIRST with `git add`, then diff what's staged
+# against HEAD (`git diff --cached`) — that correctly detects a brand-new
+# file as a real change, while still skipping a commit when the content
+# genuinely hasn't changed.
 name: Update live data
-
 on:
   schedule:
     # Hourly, on the hour. Start here.
     # Every 30 min is "*/30 * * * *" — see 5.4 before you do that.
     - cron: "0 * * * *"
   workflow_dispatch:
-
 # Never let two runs overlap and fight over the same file.
 concurrency:
   group: update-live
   cancel-in-progress: false
-
 jobs:
   fetch:
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       # No pip install step. fetch_live.py uses the standard library only.
-
       - name: Fetch from GDELT
         run: python fetch_live.py
-
       - name: Commit only if the data actually changed
         run: |
           git config user.name  "conflict-atlas-bot"
           git config user.email "conflict-atlas-bot@users.noreply.github.com"
 
-          # --quiet exits 0 when nothing changed, 1 when something did.
-          if git diff --quiet -- data/live.json; then
+          # Stage first, THEN check for a difference. Staging is what makes
+          # a brand-new, previously-untracked file visible to `git diff` at
+          # all — checking before staging is what silently broke this.
+          git add data/live.json
+
+          # --cached compares the staged content against HEAD. Exits 0 (no
+          # difference) only when the file truly hasn't changed, including
+          # correctly treating "new file, staged for the first time" as a
+          # real difference.
+          if git diff --cached --quiet -- data/live.json; then
             echo "No change since the last run. Nothing to commit."
             exit 0
           fi
 
-          git add data/live.json
           git commit -m "Live data refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
-          git push
+
+          # If another workflow pushed in the meantime, a plain push can be
+          # rejected. Pull with rebase and retry once before giving up —
+          # cheap insurance against exactly the kind of race that could
+          # happen when Update conflict data and Update live data run close
+          # together.
+          if ! git push; then
+            echo "Push rejected, likely a race with another workflow. Retrying once..."
+            git pull --rebase origin main
+            git push
+          fi
