@@ -369,31 +369,7 @@ header{
 .row .ago{font-size:10.5px;color:var(--dimmer);margin-left:auto}
 .row.fresh{background:rgba(230,193,63,.06)}
 
-/* ---------- basemap menu ---------- */
-#baseBtn{
-  position:absolute;right:12px;top:12px;padding:7px 11px;
-  font-family:var(--sans);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;font-weight:600;color:var(--dim);
-}
-#baseBtn:hover{color:var(--paper)}
-#baseMenu{
-  position:absolute;right:12px;top:46px;width:222px;padding:11px 12px;display:none;z-index:7;
-}
-#baseMenu.on{display:block}
-#baseMenu .lbl{margin-bottom:7px}
-#baseMenu .opts{display:grid;gap:4px;margin-bottom:11px}
-#baseMenu .opts button{
-  display:flex;align-items:center;gap:8px;text-align:left;padding:6px 7px;border-radius:2px;
-  font-family:var(--sans);font-size:11px;color:var(--dim);border:1px solid transparent;
-}
-#baseMenu .opts button:hover{background:var(--panel-3);color:var(--paper)}
-#baseMenu .opts button[aria-pressed=true]{border-color:var(--line);background:var(--panel-3);color:var(--paper)}
-#baseMenu .sw{width:16px;height:16px;border-radius:2px;flex:none;border:1px solid rgba(255,255,255,.14)}
-#baseMenu .locked{
-  opacity:.45;cursor:not-allowed;font-family:var(--sans);font-size:11px;color:var(--dimmer);
-  padding:6px 7px;display:flex;align-items:center;gap:8px;
-}
-#baseMenu .hint{font-family:var(--sans);font-size:9.5px;line-height:1.5;color:var(--dimmer);
-  border-top:1px solid var(--line-soft);padding-top:9px;margin-top:2px}
+
 
 /* timeline flash feedback */
 @keyframes timeline-flash{
@@ -466,19 +442,6 @@ header{
       <div class="lbl">Incident type</div>
       <div class="shapekey" id="shapekey"></div>
       <div class="note">The most severe markers in view pulse, faster as severity rises. Overlapping incidents bloom into a heat field.</div>
-    </div>
-
-    <button id="baseBtn" class="overlay" aria-expanded="false" aria-controls="baseMenu">Basemap</button>
-    <div id="baseMenu" class="overlay" role="dialog" aria-label="Basemap options">
-      <div class="lbl">Style</div>
-      <div class="opts" id="baseOpts"></div>
-      <div class="lbl">Projection</div>
-      <div class="opts" id="projOpts">
-        <button data-proj="equirect" aria-pressed="true">Equirectangular</button>
-        <button data-proj="mercator" aria-pressed="false">Web Mercator</button>
-      </div>
-      <div class="locked" title="Requires a tile provider and a network connection">Satellite / terrain — not connected</div>
-      <div class="hint">Styles are drawn from built-in vector outlines, so they work offline. Raster satellite and terrain need a tile provider, and tiles require Web Mercator.</div>
     </div>
 
     <div id="zoomctl" class="overlay">
@@ -1282,7 +1245,9 @@ dTo.onchange   = () => { const d = dayOf(dTo.value);   if (!isNaN(d)){ S.to   = 
 const playBtn = document.getElementById("play");
 let playTimer = null;
 function startPlay(){
-  const w = Math.max(30, S.to - S.from);
+  let w = S.to - S.from;
+  if (w >= TOTAL_DAYS - 1) w = Math.min(30, TOTAL_DAYS);
+  else w = Math.max(30, w);
   if (S.to >= TOTAL_DAYS){ S.from = 0; S.to = w; }
   S.playing = true; playBtn.classList.add("on");
   playBtn.setAttribute("aria-pressed","true");
@@ -1640,50 +1605,6 @@ document.querySelectorAll("#winChips button").forEach(b => b.addEventListener("c
   refresh();
 }));
 
-/* --- basemap + projection ------------------------------------- */
-// Styles are token swaps on the built-in vector map, so they cost
-// nothing and work with no network.
-const BASEMAPS = {
-  slate:    { label:"Slate",         land:"#15202B", line:"#33495F", sea:"#070B10", grat:"#111C26" },
-  minimal:  { label:"Minimal",       land:"#0F1620", line:"#243546", sea:"#05080C", grat:"#0A1017" },
-  earth:    { label:"Earth",         land:"#1B2620", line:"#41564A", sea:"#080E11", grat:"#121B18" },
-  contrast: { label:"High contrast", land:"#223040", line:"#6F8AA5", sea:"#04070A", grat:"#16202B" }
-};
-let BASEMAP = "slate";
-function applyBasemap(name){
-  BASEMAP = name;
-  const b = BASEMAPS[name], r = document.documentElement.style;
-  r.setProperty("--land", b.land);
-  r.setProperty("--land-line", b.line);
-  r.setProperty("--void", b.sea);
-  r.setProperty("--graticule", b.grat);
-  document.querySelectorAll("#baseOpts button").forEach(x =>
-    x.setAttribute("aria-pressed", String(x.dataset.base === name)));
-}
-document.getElementById("baseOpts").innerHTML = Object.entries(BASEMAPS).map(([k,v]) =>
-  `<button data-base="${k}" aria-pressed="${k===BASEMAP}">
-     <i class="sw" style="background:${v.land};border-color:${v.line}"></i>${v.label}</button>`).join("");
-document.querySelectorAll("#baseOpts button").forEach(b =>
-  b.addEventListener("click", () => applyBasemap(b.dataset.base)));
-
-document.querySelectorAll("#projOpts button").forEach(b =>
-  b.addEventListener("click", () => {
-    setProjection(b.dataset.proj);
-    document.querySelectorAll("#projOpts button").forEach(x =>
-      x.setAttribute("aria-pressed", String(x === b)));
-    drawStatic(); resetView(); markerSig = ""; renderMarkers(true);
-  }));
-
-const baseBtn = document.getElementById("baseBtn"), baseMenu = document.getElementById("baseMenu");
-baseBtn.onclick = e => {
-  e.stopPropagation();
-  const on = baseMenu.classList.toggle("on");
-  baseBtn.setAttribute("aria-expanded", String(on));
-};
-baseMenu.addEventListener("click", e => e.stopPropagation());
-document.addEventListener("click", () => {
-  baseMenu.classList.remove("on"); baseBtn.setAttribute("aria-expanded","false");
-});
 
 /* --- filters -------------------------------------------------- */
 const qEl = document.getElementById("q"), qClr = document.getElementById("qClr");
@@ -1693,10 +1614,10 @@ qEl.addEventListener("input", () => {
   clearTimeout(qDebounce);
   qDebounce = setTimeout(() => {
     S.q = qEl.value.trim().toLowerCase();
-    renderList(); paintMatches();
+    refresh();
   }, 150);
 });
-qClr.onclick = () => { qEl.value = ""; S.q = ""; qClr.hidden = true; qEl.focus(); renderList(); paintMatches(); };
+qClr.onclick = () => { qEl.value = ""; S.q = ""; qClr.hidden = true; qEl.focus(); refresh(); };
 document.getElementById("sort").onchange = e => { S.sort = e.target.value; renderList(); };
 
 /* --- one refresh path for anything time-related --------------- */
