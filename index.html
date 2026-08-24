@@ -948,11 +948,11 @@ function initMap() {
       paint: {
         'circle-color': [
           'case',
-          ['>=', ['get', 'maxSev'], 8], 'var(--h5)',
-          ['>=', ['get', 'maxSev'], 6], 'var(--h4)',
-          ['>=', ['get', 'maxSev'], 4], 'var(--h3)',
-          ['>=', ['get', 'maxSev'], 2], 'var(--h2)',
-          'var(--h1)'
+          ['>=', ['get', 'maxSev'], 8], '#E5453B',
+          ['>=', ['get', 'maxSev'], 6], '#EE8B3A',
+          ['>=', ['get', 'maxSev'], 4], '#E6C13F',
+          ['>=', ['get', 'maxSev'], 2], '#3FB8C4',
+          '#3E7BE8'
         ],
         'circle-radius': ['step', ['get', 'point_count'], 14, 5, 17, 10, 20]
       }
@@ -966,7 +966,7 @@ function initMap() {
       filter: ['has', 'point_count'],
       layout: {
         'text-field': '{point_count_abbreviated}',
-        'text-font': ['sans-serif'],
+        'text-font': ['Open Sans Regular'],
         'text-size': 11,
         'text-allow-overlap': true
       },
