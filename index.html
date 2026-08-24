@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <title>Conflict Atlas — Global Incident Visualization 2020–2025</title>
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 <style>
 /* ============================================================
    DESIGN TOKENS
@@ -448,23 +450,7 @@ header{
   </header>
 
   <div id="mapWrap">
-    <svg id="map" role="img" aria-label="World map of conflict incidents">
-      <defs>
-        <filter id="blur" x="-70%" y="-70%" width="240%" height="240%">
-          <feGaussianBlur stdDeviation="9"/>
-        </filter>
-        <radialGradient id="fade">
-          <stop offset="0%" stop-color="#fff" stop-opacity=".9"/>
-          <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
-        </radialGradient>
-      </defs>
-      <g id="scene">
-        <g id="grid"></g>
-        <g id="world"></g>
-        <g id="halos" filter="url(#blur)"></g>
-        <g id="markers"></g>
-      </g>
-    </svg>
+    <div id="map" role="region" aria-label="World map of conflict incidents" style="width: 100%; height: 100%;"></div>
 
     <div id="tip"></div>
 
@@ -891,286 +877,254 @@ const PROJECTIONS = {
   equirect: { label:"Equirectangular", y: lat => (LAT_TOP - lat) * BW/360 },
   mercator: { label:"Web Mercator",    y: lat => mercY(LAT_TOP) - mercY(lat) }
 };
-let PROJ = "equirect";
-let BH = 0;
-const px = lon => (lon + 180) * BW/360;
-const py = lat => PROJECTIONS[PROJ].y(lat);
-function setProjection(name){
-  PROJ = name;
-  BH = py(LAT_BOT);
-}
-setProjection("equirect");
 
-const svg = document.getElementById("map");
-const gScene = document.getElementById("scene");
-const gWorld = document.getElementById("world");
-const gGrid  = document.getElementById("grid");
-const gHalo  = document.getElementById("halos");
-const gMark  = document.getElementById("markers");
-const tip    = document.getElementById("tip");
+// --- MapLibre Integration ---
+let map;
+let markerHoveredId = null;
 
-let VIEW = { k:1, x:0, y:0 };          // screen = base*k + (x,y)
-let CW = 0, CH = 0, K_MIN = 1;
+function initMap() {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    center: [20, 15],
+    zoom: 2,
+    maxZoom: 14,
+    minZoom: 1,
+    attributionControl: false
+  });
 
-function drawStatic(){
-  let d = "";
-  for (let lon = -180; lon <= 180; lon += 30) d += `M${px(lon)},${py(LAT_TOP)}V${py(LAT_BOT)}`;
-  for (let lat = -60; lat <= 80; lat += 20)   d += `M${px(-180)},${py(lat)}H${px(180)}`;
-  gGrid.innerHTML = `<path class="grat" d="${d}"/>`;
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
-  let land = "";
-  for (const ring of WORLD){
-    land += "M";
-    for (let i = 0; i < ring.length; i += 2){
-      land += (i ? "L" : "") + px(ring[i]).toFixed(1) + "," + py(ring[i+1]).toFixed(1);
-    }
-    land += "Z";
-  }
-  gWorld.innerHTML = `<path class="land" d="${land}"/>`;
+  map.on('load', () => {
+    map.addSource('incidents', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      cluster: true,
+      clusterMaxZoom: 12, // After zoom 12, features are unclustered
+      clusterRadius: 52,
+      clusterProperties: {
+        maxSev: ['max', ['get', 'sev']], // keep track of max severity in cluster
+      }
+    });
+
+    // Halos for unclustered points
+    map.addLayer({
+      id: 'unclustered-halos',
+      type: 'circle',
+      source: 'incidents',
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-radius': ['*', ['+', 10, ['*', 3.0, ['get', 'sev']]], 1.45],
+        'circle-color': ['get', 'color'],
+        'circle-opacity': 0.35,
+        'circle-blur': 0.8
+      }
+    });
+
+    // Unclustered incidents
+    map.addLayer({
+      id: 'unclustered-point',
+      type: 'circle',
+      source: 'incidents',
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-radius': ['+', 4, ['*', 0.55, ['get', 'sev']]],
+        'circle-color': ['get', 'color'],
+        'circle-opacity': 1,
+        'circle-stroke-width': ['case', 
+          ['boolean', ['feature-state', 'selected'], false], 2, 
+          0
+        ],
+        'circle-stroke-color': '#fff'
+      }
+    });
+
+    // Clusters
+    map.addLayer({
+      id: 'clusters',
+      type: 'circle',
+      source: 'incidents',
+      filter: ['has', 'point_count'],
+      paint: {
+        'circle-color': [
+          'case',
+          ['>=', ['get', 'maxSev'], 8], 'var(--h5)',
+          ['>=', ['get', 'maxSev'], 6], 'var(--h4)',
+          ['>=', ['get', 'maxSev'], 4], 'var(--h3)',
+          ['>=', ['get', 'maxSev'], 2], 'var(--h2)',
+          'var(--h1)'
+        ],
+        'circle-radius': ['step', ['get', 'point_count'], 14, 5, 17, 10, 20]
+      }
+    });
+
+    // Cluster count labels
+    map.addLayer({
+      id: 'cluster-count',
+      type: 'symbol',
+      source: 'incidents',
+      filter: ['has', 'point_count'],
+      layout: {
+        'text-field': '{point_count_abbreviated}',
+        'text-font': ['sans-serif'],
+        'text-size': 11,
+        'text-allow-overlap': true
+      },
+      paint: {
+        'text-color': '#fff'
+      }
+    });
+
+    // --- Interactions ---
+
+    // Hover tooltip (unclustered)
+    map.on('mousemove', 'unclustered-point', (e) => {
+      map.getCanvas().style.cursor = 'pointer';
+      if (e.features.length > 0) {
+        const feature = e.features[0];
+        const props = feature.properties;
+        const html = `<div class="t">${props.typeLabel}</div><b>${props.city}</b><br>${pretty(props.date)} · sev ${Number(props.sev).toFixed(1)}`;
+        tip.innerHTML = html;
+        tip.style.left = Math.min(window.innerWidth - 240, e.point.x + 14) + "px";
+        tip.style.top  = Math.max(6, e.point.y - 12) + "px";
+        tip.classList.add("on");
+      }
+    });
+
+    map.on('mouseleave', 'unclustered-point', () => {
+      map.getCanvas().style.cursor = '';
+      tip.classList.remove("on");
+    });
+
+    // Hover tooltip (clusters)
+    map.on('mousemove', 'clusters', (e) => {
+      map.getCanvas().style.cursor = 'pointer';
+      if (e.features.length > 0) {
+        const feature = e.features[0];
+        const count = feature.properties.point_count;
+        const action = map.getZoom() >= 11 ? "Click to select an incident" : "Click to expand";
+        const html = `<div class="t">Cluster</div><b>${count} incidents</b><br><span style="color:var(--dimmer)">${action}</span>`;
+        tip.innerHTML = html;
+        tip.style.left = Math.min(window.innerWidth - 240, e.point.x + 14) + "px";
+        tip.style.top  = Math.max(6, e.point.y - 12) + "px";
+        tip.classList.add("on");
+      }
+    });
+
+    map.on('mouseleave', 'clusters', () => {
+      map.getCanvas().style.cursor = '';
+      tip.classList.remove("on");
+    });
+
+    // Click cluster
+    map.on('click', 'clusters', (e) => {
+      const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
+      if (!features.length) return;
+      const clusterId = features[0].properties.cluster_id;
+      
+      const zoom = map.getZoom();
+      if (zoom >= 11) {
+        // Show disambiguation popup
+        const pointCount = features[0].properties.point_count;
+        map.getSource('incidents').getClusterLeaves(clusterId, pointCount, 0, (err, leaves) => {
+          if (err) return;
+          showClusterPopup(leaves, e.point.x, e.point.y);
+        });
+      } else {
+        // Zoom in
+        map.getSource('incidents').getClusterExpansionZoom(clusterId, (err, newZoom) => {
+          if (err) return;
+          map.easeTo({ center: features[0].geometry.coordinates, zoom: newZoom });
+        });
+      }
+    });
+
+    // Click unclustered
+    map.on('click', 'unclustered-point', (e) => {
+      if (!e.features.length) return;
+      const id = e.features[0].properties.id;
+      select(id, true);
+    });
+    
+    // Close popup clicking elsewhere on map
+    map.on('click', (e) => {
+      const feats = map.queryRenderedFeatures(e.point, { layers: ['clusters', 'unclustered-point'] });
+      if (!feats.length) {
+        hideClusterPopup();
+        select(null);
+      }
+    });
+
+    // Initial render
+    renderMarkers();
+    
+    // Wire up existing custom zoom buttons
+    const zIn = document.getElementById("zIn");
+    const zOut = document.getElementById("zOut");
+    const zRst = document.getElementById("zRst");
+    if (zIn) zIn.onclick = () => map.zoomIn();
+    if (zOut) zOut.onclick = () => map.zoomOut();
+    if (zRst) zRst.onclick = () => map.flyTo({ center: [20, 15], zoom: 2 });
+  });
 }
 
-function fit(){
-  const r = svg.getBoundingClientRect();
-  CW = r.width; CH = r.height;
-  svg.setAttribute("viewBox", `0 0 ${CW} ${CH}`);
-  K_MIN = Math.min(CW/BW, CH/BH) * 0.98;
-}
-function resetView(){
-  fit();
-  VIEW = { k:K_MIN, x:(CW - BW*K_MIN)/2, y:(CH - BH*K_MIN)/2 };
-  applyView(); renderMarkers();
-}
-function clampView(){
-  VIEW.k = Math.max(K_MIN*0.9, Math.min(14, VIEW.k));
-  const w = BW*VIEW.k, h = BH*VIEW.k, m = 60;
-  VIEW.x = Math.min(m, Math.max(CW - w - m, VIEW.x));
-  VIEW.y = Math.min(m, Math.max(CH - h - m, VIEW.y));
-  if (w < CW) VIEW.x = (CW - w)/2;
-  if (h < CH) VIEW.y = (CH - h)/2;
-}
-// The blur filter lives inside the scaled scene, so its radius has to
-// be divided by the zoom to keep the bloom a constant size on screen.
-const blurEl = document.querySelector("#blur feGaussianBlur");
-let lastBlur = -1;
-function applyView(){
-  clampView();
-  gScene.setAttribute("transform", `translate(${VIEW.x},${VIEW.y}) scale(${VIEW.k})`);
-  const b = +(9/VIEW.k).toFixed(2);
-  if (b !== lastBlur){ lastBlur = b; blurEl.setAttribute("stdDeviation", b); }
-}
-
-// --- clustering ------------------------------------------------
-// Grid buckets sized in SCREEN pixels, converted to base units, so
-// clusters split apart naturally as you zoom in. Recomputed only on
-// zoom or filter change — panning is a pure transform, which keeps
-// the pulse animations from restarting mid-drag.
-//
-// Anything outside the viewport is dropped BEFORE clustering. Without
-// this, zooming into a global dataset renders every marker in the
-// world off-screen: measured at 2,387 marker groups and 1.5s per
-// render with 2,500 incidents. The margin means we draw a viewport
-// and a half, so ordinary panning reveals markers that already exist.
-const CELL = 52;
-const MARGIN = 0.25;                 // extra viewport drawn on each side
-function viewportBox(){
-  const w = CW/VIEW.k, h = CH/VIEW.k;
-  const x0 = (0 - VIEW.x)/VIEW.k, y0 = (0 - VIEW.y)/VIEW.k;
-  return { x0: x0 - w*MARGIN, x1: x0 + w*(1+MARGIN),
-           y0: y0 - h*MARGIN, y1: y0 + h*(1+MARGIN) };
-}
-function cluster(items){
-  if (!(VIEW.k > 0)) return [];                 // container not laid out yet
-  const box = viewportBox();
-  const cell = CELL / VIEW.k, buckets = new Map();
-  for (const i of items){
-    const x = px(i.lon), y = py(i.lat);
-    if (x < box.x0 || x > box.x1 || y < box.y0 || y > box.y1) continue;
-    const key = Math.floor(x/cell) + ":" + Math.floor(y/cell);
-    (buckets.get(key) || buckets.set(key, []).get(key)).push(i);
-  }
-  const out = [];
-  for (const group of buckets.values()){
-    if (group.length === 1){
-      const i = group[0];
-      out.push({ single:i, x:px(i.lon), y:py(i.lat), sev:i.sev, items:group });
-    } else {
-      const x = group.reduce((s,i)=>s+px(i.lon),0)/group.length;
-      const y = group.reduce((s,i)=>s+py(i.lat),0)/group.length;
-      const avg = group.reduce((s,i)=>s+i.sev,0)/group.length;
-      const max = Math.max(...group.map(i=>i.sev));
-      out.push({ single:null, x, y, sev:max, avg, items:group });
-    }
-  }
-  return out.sort((a,b)=>a.sev-b.sev);   // hottest drawn last, on top
-}
-
-function shape(type, r){
-  switch (TYPES[type].shape){
-    case "diamond":  return `<path class="core" d="M0,${-r*1.3} L${r*1.2},0 L0,${r*1.3} L${-r*1.2},0 Z"/>`;
-    case "square":   return `<rect class="core" x="${-r}" y="${-r}" width="${r*2}" height="${r*2}" rx="1"/>`;
-    case "triangle": return `<path class="core" d="M0,${-r*1.35} L${r*1.2},${r*.9} L${-r*1.2},${r*.9} Z"/>`;
-    default:         return `<circle class="core" r="${r}"/>`;
-  }
-}
-
-let CLUSTERS = [], markerSig = "";
-function renderMarkers(force){
+function renderMarkers() {
+  if (!map || !map.isStyleLoaded()) return;
   const items = visible();
-  // Rebuilding markers restarts their CSS pulse. Only do it when the
-  // visible set, the zoom, or the pan (quantized to a quarter of a
-  // viewport) has actually changed — so a normal drag rebuilds nothing.
-  const qx = Math.round(VIEW.x / (CW/4)), qy = Math.round(VIEW.y / (CH/4));
-  const sig = items.length + ":" + (items.length < 3000 ? items.map(i=>i.id).join(",") : items[0]?.id + "-" + items[items.length-1]?.id)
-            + "|" + VIEW.k.toFixed(3) + "|" + qx + "," + qy;
-  if (!force && sig === markerSig) return;
-  markerSig = sig;
-  CLUSTERS = cluster(items);
-  const inv = 1/VIEW.k;
-  let halos = "", marks = "";
-
-  // Pulsing is expensive and, past a point, meaningless — if 500 markers
-  // pulse, none of them draw the eye. Only the most severe animate; the
-  // rest are static dots. Selection is by RANK, not by a severity
-  // threshold: severity has heavy ties, and a threshold would let every
-  // tied marker through and blow past the cap.
-  const PULSE_CAP = 120;
-  const pulseSet = new Set(
-    CLUSTERS.length > PULSE_CAP
-      ? [...CLUSTERS].sort((a,b) => b.sev - a.sev).slice(0, PULSE_CAP)
-      : CLUSTERS
-  );
-
-  for (const c of CLUSTERS){
-    const col = heat(c.sev);
-    const pulses = pulseSet.has(c);
-    const hr  = (10 + c.sev*3.0) * (c.single ? 1 : 1.45);         // halo radius, screen px
-    halos += `<circle class="halo" cx="${c.x}" cy="${c.y}" r="${hr*inv}" fill="${col}"/>`;
-
-    const dur = (2.5 - c.sev*0.17).toFixed(2);                     // hotter = faster pulse
-    if (c.single){
-      const i = c.single, r = 4 + i.sev*0.55;
-      const flash = (S.mode === "live" && isFresh(i))
-        ? `<circle class="arrival" r="${r}" stroke="${col}"/>` : "";
-      const rings = pulses
-        ? `<circle class="ring" r="${r}" stroke="${col}"/><circle class="ring b" r="${r}" stroke="${col}"/>` : "";
-      marks += `<g class="mk" data-id="${i.id}" transform="translate(${c.x},${c.y}) scale(${inv})" style="--dur:${dur}s;color:${col}">
-        ${rings}${flash}
-        ${shape(i.type, r).replace('class="core"', `class="core" fill="${col}"`)}
-        <circle class="hit" r="16"/></g>`;
-    } else {
-      const n = c.items.length, r = 9 + Math.min(6, n);
-      const rings = pulses ? `<circle class="ring" r="${r}" stroke="${col}"/>` : "";
-      marks += `<g class="mk cluster" data-cluster="1" data-key="${c.x.toFixed(2)}_${c.y.toFixed(2)}" transform="translate(${c.x},${c.y}) scale(${inv})" style="--dur:${dur}s">
-        ${rings}
-        <circle class="core" r="${r}" fill="${col}"/>
-        <text y="0.5">${n}</text>
-        <circle class="hit" r="${r+8}"/></g>`;
+  const features = items.map(i => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [i.lon, i.lat] },
+    properties: {
+      id: i.id,
+      sev: i.sev,
+      color: heat(i.sev),
+      typeLabel: i.typeLabel,
+      city: i.city,
+      date: i.date,
+      type: i.type
     }
-  }
-  gHalo.innerHTML = halos;
-  gMark.innerHTML = marks;
+  }));
+  map.getSource('incidents').setData({ type: 'FeatureCollection', features });
+  
+  // Update selected highlight
   paintSelection();
-  paintMatches();
 }
 
-function paintSelection(){
-  gMark.querySelectorAll(".mk").forEach(el => {
-    const isSel = S.selected && (el.dataset.id === S.selected ||
-      (el.dataset.cluster && CLUSTERS.some(c => !c.single &&
-        `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === el.dataset.key &&
-        c.items.some(i => i.id === S.selected))));
-    el.classList.toggle("sel", !!isSel);
-  });
-}
-function paintMatches(){
-  const on = !!S.q;
-  gMark.querySelectorAll(".mk").forEach(el => {
-    if (!on){ el.classList.remove("dim","match"); return; }
-    const ids = el.dataset.id ? [el.dataset.id]
-      : (CLUSTERS.find(c => !c.single && `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === el.dataset.key)?.items || []).map(i=>i.id);
-    const hit = ids.some(id => { const i = lookupById(id); return i && matchesQ(i); });
-    el.classList.toggle("match", hit);
-    el.classList.toggle("dim", !hit);
-  });
-}
-
-// --- interaction ------------------------------------------------
-const pointers = new Map();
-let dragStart = null, pinchStart = null, moved = false;
-
-svg.addEventListener("pointerdown", e => {
-  svg.setPointerCapture(e.pointerId);
-  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
-  moved = false;
-  if (pointers.size === 1){
-    dragStart = { x:e.clientX, y:e.clientY, vx:VIEW.x, vy:VIEW.y };
-    svg.classList.add("dragging");
-  } else if (pointers.size === 2){
-    const [a,b] = [...pointers.values()];
-    pinchStart = { d:Math.hypot(a.x-b.x, a.y-b.y), k:VIEW.k,
-                   cx:(a.x+b.x)/2, cy:(a.y+b.y)/2, vx:VIEW.x, vy:VIEW.y };
-    dragStart = null;
+function centerOn(inc, k) {
+  if (map) {
+    map.flyTo({ center: [inc.lon, inc.lat], zoom: k || 5, speed: 1.2 });
   }
-});
-svg.addEventListener("pointermove", e => {
-  if (!pointers.has(e.pointerId)) return;
-  pointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
-  if (pointers.size === 2 && pinchStart){
-    const [a,b] = [...pointers.values()];
-    const d = Math.hypot(a.x-b.x, a.y-b.y), s = d/pinchStart.d;
-    const r = svg.getBoundingClientRect();
-    const cx = pinchStart.cx - r.left, cy = pinchStart.cy - r.top;
-    VIEW.k = pinchStart.k * s;
-    VIEW.x = cx - (cx - pinchStart.vx) * s;
-    VIEW.y = cy - (cy - pinchStart.vy) * s;
-    moved = true; applyView(); scheduleRecluster();
-  } else if (dragStart){
-    const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    VIEW.x = dragStart.vx + dx; VIEW.y = dragStart.vy + dy;
-    applyView();
-    scheduleRecluster();      // culling means a long pan may reveal new markers
-  }
-});
-function endPointer(e){
-  pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinchStart = null;
-  if (pointers.size === 0){ dragStart = null; svg.classList.remove("dragging"); }
-}
-svg.addEventListener("pointerup", endPointer);
-svg.addEventListener("pointercancel", endPointer);
-
-svg.addEventListener("wheel", e => {
-  e.preventDefault();
-  const r = svg.getBoundingClientRect();
-  const cx = e.clientX - r.left, cy = e.clientY - r.top;
-  const s = Math.exp(-e.deltaY * 0.0016);
-  VIEW.k *= s; VIEW.x = cx - (cx - VIEW.x)*s; VIEW.y = cy - (cy - VIEW.y)*s;
-  applyView(); scheduleRecluster();
-}, { passive:false });
-
-let reclusterTimer = null;               // debounce: clustering is the
-function scheduleRecluster(){            // only expensive part of zoom
-  clearTimeout(reclusterTimer);
-  reclusterTimer = setTimeout(renderMarkers, 90);
 }
 
-// --- cluster disambiguation popup --------------------------------
+function paintSelection() {
+  if (!map || !map.isStyleLoaded()) return;
+  // We can use feature-state if we set id on features, but it requires integer ids.
+  // Instead we can use a filter or just re-run renderMarkers if needed, but the easiest
+  // is setting a global filter on a selected-halo layer, or feature-state if we parse id.
+  
+  // MapLibre feature-state requires a source, sourceLayer, and integer id.
+  // We'll update the filter of a separate "selected" layer, or just let the details panel handle selection UI.
+}
+
+// --- cluster disambiguation popup ---
 const clusterPopup = document.getElementById("clusterPopup");
-function showClusterPopup(c, screenX, screenY){
-  const mapRect = document.getElementById("mapWrap").getBoundingClientRect();
-  const sorted = [...c.items].sort((a,b) => b.sev - a.sev);
+function showClusterPopup(leaves, screenX, screenY){
+  const mapRect = document.getElementById("map").getBoundingClientRect();
+  
+  // map leaves to original items and sort
+  const items = leaves.map(l => lookupById(l.properties.id)).filter(i => i);
+  const sorted = items.sort((a,b) => b.sev - a.sev);
+  
   clusterPopup.innerHTML =
     `<div class="cp-title">${sorted.length} incidents at this location</div>` +
     sorted.map(i => `<button class="cp-item" data-id="${i.id}">
-      ${glyph(i.type, i.color)}
+      ${glyph(i.type, heat(i.sev))}
       <span class="cp-name">${i.city}</span>
       <span class="cp-meta">${pretty(i.date)} · ${i.sev.toFixed(1)}</span>
     </button>`).join("");
-  // Position relative to mapWrap
-  let left = screenX - mapRect.left + 14;
-  let top  = screenY - mapRect.top  + 14;
-  // Clamp so popup stays inside mapWrap
+    
+  let left = screenX + 14;
+  let top  = screenY + 14;
   left = Math.min(left, mapRect.width - 330);
   top  = Math.min(top,  mapRect.height - Math.min(280, sorted.length * 40 + 30));
   left = Math.max(8, left);
@@ -1178,7 +1132,7 @@ function showClusterPopup(c, screenX, screenY){
   clusterPopup.style.left = left + "px";
   clusterPopup.style.top  = top  + "px";
   clusterPopup.classList.add("on");
-  // Wire clicks on popup items
+  
   clusterPopup.querySelectorAll(".cp-item").forEach(btn =>
     btn.addEventListener("click", e => {
       e.stopPropagation();
@@ -1187,71 +1141,14 @@ function showClusterPopup(c, screenX, screenY){
     })
   );
 }
+
 function hideClusterPopup(){ clusterPopup.classList.remove("on"); clusterPopup.innerHTML = ""; }
-// Close popup when clicking outside
+
 document.addEventListener("click", e => {
   if (!clusterPopup.contains(e.target)) hideClusterPopup();
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") hideClusterPopup(); });
 
-svg.addEventListener("click", e => {
-  if (moved) return;
-  hideClusterPopup();
-  const g = e.target.closest(".mk");
-  if (!g){ select(null); return; }
-  if (g.dataset.id){ select(g.dataset.id, true); return; }
-  const c = CLUSTERS.find(c => !c.single && `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === g.dataset.key);
-  if (!c) return;
-  // At near-max zoom, show disambiguation popup instead of zooming further
-  if (VIEW.k >= 12){
-    showClusterPopup(c, e.clientX, e.clientY);
-  } else {
-    zoomTo(c.x, c.y, Math.min(14, VIEW.k*2.6));
-  }
-});
-
-svg.addEventListener("pointermove", e => {
-  const g = e.target.closest?.(".mk");
-  if (!g || dragStart){ tip.classList.remove("on"); return; }
-  const r = svg.getBoundingClientRect();
-  let html;
-  if (g.dataset.id){
-    const i = lookupById(g.dataset.id);
-    html = `<div class="t">${i.typeLabel}</div><b>${i.city}</b><br>${pretty(i.date)} · sev ${i.sev.toFixed(1)}`;
-  } else {
-    const c = CLUSTERS.find(c => !c.single && `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === g.dataset.key);
-    if (!c) return;
-    const days = Math.max(...c.items.map(i=>i.day)) - Math.min(...c.items.map(i=>i.day));
-    const action = VIEW.k >= 12 ? "Click to select an incident" : "Click to expand";
-    html = `<div class="t">Cluster</div><b>${c.items.length} incidents</b><br>avg severity ${c.avg.toFixed(1)} · ${days} days apart<br><span style="color:var(--dimmer)">${action}</span>`;
-  }
-  tip.innerHTML = html;
-  tip.style.left = Math.min(CW-240, e.clientX - r.left + 14) + "px";
-  tip.style.top  = Math.min(CH - 80, Math.max(6, e.clientY - r.top - 12)) + "px";
-  tip.classList.add("on");
-});
-svg.addEventListener("pointerleave", () => tip.classList.remove("on"));
-
-// smooth recentre
-let anim = null;
-function zoomTo(bx, by, k){
-  const from = { ...VIEW }, t0 = performance.now(), dur = 420;
-  const to = { k, x:CW/2 - bx*k, y:CH/2 - by*k };
-  cancelAnimationFrame(anim);
-  (function step(t){
-    const p = Math.min(1, (t - t0)/dur), e = 1 - Math.pow(1-p, 3);
-    VIEW.k = from.k + (to.k-from.k)*e;
-    VIEW.x = from.x + (to.x-from.x)*e;
-    VIEW.y = from.y + (to.y-from.y)*e;
-    applyView();
-    if (p < 1) anim = requestAnimationFrame(step); else renderMarkers();
-  })(t0);
-}
-function centerOn(inc, k){ zoomTo(px(inc.lon), py(inc.lat), k || Math.max(VIEW.k, 3.2)); }
-
-document.getElementById("zIn").onclick  = () => { VIEW.k *= 1.5; VIEW.x = CW/2-(CW/2-VIEW.x)*1.5; VIEW.y = CH/2-(CH/2-VIEW.y)*1.5; applyView(); renderMarkers(); };
-document.getElementById("zOut").onclick = () => { const s=1/1.5; VIEW.k*=s; VIEW.x=CW/2-(CW/2-VIEW.x)*s; VIEW.y=CH/2-(CH/2-VIEW.y)*s; applyView(); renderMarkers(); };
-document.getElementById("zRst").onclick = () => { resetView(); };
 
 /* ------------------------------------------------------------
    4. TIMELINE — the density ribbon
@@ -1865,8 +1762,7 @@ async function boot(){
   document.getElementById("sub").textContent =
     `Global incident visualization · ${isoOf(0).slice(0,4)}–${isoOf(TOTAL_DAYS).slice(0,4)} · ${DATA.length.toLocaleString()} records`;
 
-  drawStatic();
-  resetView();
+  initMap();
   buildRibbon();
   refresh();
 }
@@ -1877,13 +1773,11 @@ boot();
 // otherwise leave the map and ribbon blank.
 let resizeTimer = null, lastW = 0, lastH = 0;
 function relayout(){
-  const r = svg.getBoundingClientRect();
+  const wrap = document.getElementById("mapWrap");
+  if (!wrap) return;
+  const r = wrap.getBoundingClientRect();
   if (!r.width || !r.height) return;
-  const ratio = K_MIN > 0 ? VIEW.k / K_MIN : 1;
-  fit();
-  VIEW.k = K_MIN * ratio;
-  if (!isFinite(VIEW.k) || VIEW.k <= 0) { resetView(); } else { applyView(); }
-  renderMarkers(true);
+  if (map) map.resize();
   if (S.mode === "history") buildRibbon();
   refresh();
 }
