@@ -482,7 +482,7 @@ header{
         <button id="livePause" aria-pressed="false">Pause</button>
         <button id="liveRestart">Restart</button>
       </div>
-      <div class="srcline">Source: <b>Replay</b> — archived records streamed on a simulated clock. No live connection.</div>
+      <div class="srcline" id="srcLine">Source: <b>Replay</b> — archived records streamed on a simulated clock. No live connection.</div>
     </div>
     <div id="sparkWrap"><svg id="spark" aria-label="Incident activity across the feed window"></svg></div>
    </div>
@@ -780,10 +780,16 @@ function ingest(rows){
       id:r.id, date:r.date, day:dayOf(r.date),
       city:r.loc[0], region:r.loc[1], country:r.loc[2], lat:r.loc[3], lon:r.loc[4],
       type:r.type, typeLabel:TYPES[r.type].label, desc:r.desc, cas:r.cas,
-      quality:r.quality, ongoing:!!r.ongoing, tags:r.tags,
-      sources:(r.src||[]).map(n => ({ name:n, url:OUTLETS[n] || null }))
+      quality:r.quality, ongoing:!!r.ongoing, tags:r.tags||[],
+      sources:(r.src||[]).map(n => ({
+        name:n,
+        url: OUTLETS[n] || (/\./.test(n) && !/\s/.test(n) ? "https://"+n : null)
+      }))
     };
-    inc.sev = severity(inc);
+    // Live/GDELT records carry their own severity (coverage volume + Goldstein
+    // score, not casualties — see fetch_live.py). Historical records never
+    // have this field, so they fall through to the normal calculation.
+    inc.sev = (typeof r.severity === "number") ? Math.max(0, Math.min(10, r.severity)) : severity(inc);
     inc.color = heat(inc.sev);
     inc.hay = (inc.city+" "+inc.region+" "+inc.country+" "+inc.typeLabel+" "+inc.tags.join(" ")).toLowerCase();
     return inc;
@@ -791,7 +797,23 @@ function ingest(rows){
 }
 
 let DATA = [];
+let HISTORICAL_LABEL = "Sample data";   // set once in boot(), restored when returning to Historical mode
 let BY_ID = new Map();          // O(1) lookup; DATA.find was O(n) per marker
+let LIVE_BY_ID = new Map();     // same, for LIVE_DATA once a real feed is wired up
+
+// Which array is "the data" right now. Historical mode, or Live mode
+// while replaying, both use DATA. Live mode with a real feed wired up
+// (USE_REAL_FEED, set near LiveFeedSource below) uses LIVE_DATA instead
+// — a small, separately-ingested, frequently-refreshed array. Every
+// consumer of "the current dataset" goes through this, not DATA
+// directly, or it would silently keep showing historical data once a
+// real feed is switched on.
+function activeDataset(){
+  return (S.mode === "live" && typeof USE_REAL_FEED !== "undefined" && USE_REAL_FEED) ? LIVE_DATA : DATA;
+}
+function lookupById(id){
+  return BY_ID.get(id) || LIVE_BY_ID.get(id);
+}
 
 const S = {                                    // application state
   mode: "history",                             // "history" | "live"
@@ -804,7 +826,7 @@ const inRange  = i => S.mode === "live"
   ? (i.day <= LIVE.now && i.day > LIVE.now - LIVE.win)
   : (i.day >= S.from && i.day <= S.to);
 const matchesQ = i => !S.q || i.hay.includes(S.q);
-const visible  = () => DATA.filter(inRange);            // drives the map
+const visible  = () => activeDataset().filter(inRange);   // drives the map
 const listed   = () => {                                 // drives the panel
   const out = visible().filter(matchesQ);
   // A live feed has one correct order: most recent first. Sorting is
@@ -1031,7 +1053,7 @@ function paintMatches(){
     if (!on){ el.classList.remove("dim","match"); return; }
     const ids = el.dataset.id ? [el.dataset.id]
       : (CLUSTERS.find(c => !c.single && `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === el.dataset.key)?.items || []).map(i=>i.id);
-    const hit = ids.some(id => { const i = BY_ID.get(id); return i && matchesQ(i); });
+    const hit = ids.some(id => { const i = lookupById(id); return i && matchesQ(i); });
     el.classList.toggle("match", hit);
     el.classList.toggle("dim", !hit);
   });
@@ -1113,7 +1135,7 @@ svg.addEventListener("pointermove", e => {
   const r = svg.getBoundingClientRect();
   let html;
   if (g.dataset.id){
-    const i = BY_ID.get(g.dataset.id);
+    const i = lookupById(g.dataset.id);
     html = `<div class="t">${i.typeLabel}</div><b>${i.city}</b><br>${pretty(i.date)} · sev ${i.sev.toFixed(1)}`;
   } else {
     const c = CLUSTERS.find(c => !c.single && `${c.x.toFixed(2)}_${c.y.toFixed(2)}` === g.dataset.key);
@@ -1366,7 +1388,7 @@ let detailSig = "";
 function renderDetails(){
   if (detailSig === String(S.selected)) return;
   detailSig = String(S.selected);
-  const i = BY_ID.get(S.selected);
+  const i = lookupById(S.selected);
   if (!i){ detailsEl.classList.remove("on"); detailsEl.innerHTML = ""; return; }
   detailsEl.classList.add("on");
   detailsEl.innerHTML = `
@@ -1410,7 +1432,7 @@ function renderDetails(){
 /* --- selection keeps map, list and card in step --------------- */
 function select(id, fromMap, fromList){
   S.selected = (S.selected === id) ? null : id;
-  const i = S.selected ? BY_ID.get(S.selected) : null;
+  const i = S.selected ? lookupById(S.selected) : null;
   if (i && fromList) centerOn(i);
   renderList(); renderDetails(); paintSelection();
   if (i && fromMap){
@@ -1467,6 +1489,44 @@ const ReplaySource = {
   stop(){ if (this.tick) clearInterval(this.tick); this.tick = null; }
 };
 
+// USE_REAL_FEED — the one-line switch. Leave false until data/live.json
+// exists and is being refreshed by update-live.yml (Stage 5.2). Flip to
+// true once you've confirmed the file is updating — check its
+// "generated" timestamp on GitHub before trusting it here.
+const USE_REAL_FEED = true;
+const LIVE_FEED_PATH = "./data/live.json";
+const LIVE_POLL_MS = 60000;      // how often the browser re-checks the file
+
+let LIVE_DATA = [];              // ingested contents of live.json, kept
+                                  // separate from the historical DATA array
+
+const LiveFeedSource = {
+  timer: null,
+  start(onTick){
+    this.stop();
+    const poll = async () => {
+      try {
+        const r = await fetch(LIVE_FEED_PATH, { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        const rows = Array.isArray(j.incidents) ? j.incidents : [];
+        LIVE_DATA = ingest(rows);   // uses the SAME T0 fixed at boot — never re-anchor it here
+        LIVE_BY_ID = new Map(LIVE_DATA.map(i => [i.id, i]));
+        LIVE.now = dayOf(new Date().toISOString().slice(0, 10));
+        onTick(0);                 // 0 days advanced — this is a refresh, not a replay
+      } catch (e){
+        // A failed fetch here means the same thing it means in
+        // fetch_live.py: say nothing alarming, keep showing whatever
+        // LIVE_DATA already has, try again next interval.
+        console.warn("live feed fetch failed:", e.message);
+      }
+    };
+    poll();
+    this.timer = setInterval(poll, LIVE_POLL_MS);
+  },
+  stop(){ if (this.timer) clearInterval(this.timer); this.timer = null; }
+};
+
 const LIVE = {
   now: 0,                    // simulated present, as a day index
   win: 365,                  // feed window, in days before `now`
@@ -1476,13 +1536,10 @@ const LIVE = {
 };
 const FRESH_MS = 20000;      // how long an arrival counts as "new"
 
-function liveVisible(){
-  return DATA.filter(i => i.day <= LIVE.now && i.day > LIVE.now - LIVE.win);
-}
 function advance(days){
   LIVE.now += days;
-  if (LIVE.now > TOTAL_DAYS + LIVE.win){ restartReplay(false); return; }
-  for (const i of DATA){
+  if (!USE_REAL_FEED && LIVE.now > TOTAL_DAYS + LIVE.win){ restartReplay(false); return; }
+  for (const i of activeDataset()){
     if (i.day <= LIVE.now && !LIVE.seen.has(i.id)){
       LIVE.seen.add(i.id);
       LIVE.arrivals.set(i.id, Date.now());
@@ -1491,13 +1548,14 @@ function advance(days){
   refresh();
 }
 function restartReplay(keepRunning){
+  if (USE_REAL_FEED) return;   // "restart" only makes sense for the simulated clock
   LIVE.now = 0; LIVE.arrivals.clear(); LIVE.seen.clear();
   if (keepRunning !== false && LIVE.running) startLive();
   refresh();
 }
 function startLive(){
   LIVE.running = true;
-  ReplaySource.start(advance);
+  (USE_REAL_FEED ? LiveFeedSource : ReplaySource).start(advance);
   document.getElementById("livePill").classList.remove("paused");
   document.getElementById("liveState").textContent = "Streaming";
   document.getElementById("livePause").textContent = "Pause";
@@ -1505,7 +1563,7 @@ function startLive(){
 }
 function pauseLive(){
   LIVE.running = false;
-  ReplaySource.stop();
+  (USE_REAL_FEED ? LiveFeedSource : ReplaySource).stop();
   document.getElementById("livePill").classList.add("paused");
   document.getElementById("liveState").textContent = "Paused";
   document.getElementById("livePause").textContent = "Resume";
@@ -1528,7 +1586,7 @@ function drawSpark(){
   spark.setAttribute("viewBox", `0 0 ${w} ${H}`);
   const step = LIVE.win / BUCKETS, bw = w / BUCKETS;
   const counts = new Array(BUCKETS).fill(0), sevs = new Array(BUCKETS).fill(0);
-  for (const i of liveVisible()){
+  for (const i of visible()){
     const b = Math.min(BUCKETS-1, Math.max(0, Math.floor((i.day - (LIVE.now - LIVE.win)) / step)));
     counts[b]++; sevs[b] = Math.max(sevs[b], i.sev);
   }
@@ -1554,9 +1612,17 @@ function setMode(mode){
   document.querySelectorAll(".modes button").forEach(b =>
     b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
   document.getElementById("sub").textContent = mode === "live"
-    ? "Rolling feed · simulated clock over archived records"
+    ? (USE_REAL_FEED ? "Live feed · GDELT news mentions, not verified records" : "Rolling feed · simulated clock over archived records")
     : "Global incident visualization · Jan 2020 – Dec 2025";
-  document.getElementById("dataBadge").textContent = mode === "live" ? "Replay" : "Sample data";
+  if (mode === "live"){
+    const line = document.getElementById("srcLine");
+    if (line) line.innerHTML = USE_REAL_FEED
+      ? 'Source: <b>GDELT</b> — machine-matched news mentions, refreshed periodically. Not a verified incident record.'
+      : 'Source: <b>Replay</b> — archived records streamed on a simulated clock. No live connection.';
+    document.getElementById("dataBadge").textContent = USE_REAL_FEED ? "GDELT" : "Replay";
+  } else {
+    document.getElementById("dataBadge").textContent = HISTORICAL_LABEL;
+  }
   document.getElementById("sort").disabled = (mode === "live");
   S.selected = null;
   if (mode === "live"){
@@ -1638,7 +1704,7 @@ document.getElementById("sort").onchange = e => { S.sort = e.target.value; rende
 
 /* --- one refresh path for anything time-related --------------- */
 function refresh(){
-  if (S.selected){ const sel = BY_ID.get(S.selected); if (!sel || !inRange(sel)) S.selected = null; }
+  if (S.selected){ const sel = lookupById(S.selected); if (!sel || !inRange(sel)) S.selected = null; }
   if (S.mode === "live"){
     const n = Math.max(0, Math.min(TOTAL_DAYS, Math.round(LIVE.now)));
     document.getElementById("liveClock").textContent = pretty(isoOf(n));
@@ -1691,6 +1757,7 @@ async function boot(){
   dFrom.min = dTo.min = isoOf(0);
   dFrom.max = dTo.max = isoOf(TOTAL_DAYS);
   document.getElementById("dataBadge").textContent = label;
+  HISTORICAL_LABEL = label;
   document.getElementById("dataBadge").title =
     DATA.length.toLocaleString() + " incidents · " + isoOf(0) + " to " + isoOf(TOTAL_DAYS);
   document.getElementById("sub").textContent =
