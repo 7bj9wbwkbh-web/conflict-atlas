@@ -845,6 +845,39 @@ const PROJECTIONS = {
 let map;
 let markerHoveredId = null;
 
+
+  function createShapeImage(shape, size) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw white shape for SDF alpha mask
+    ctx.fillStyle = 'white'; 
+    ctx.beginPath();
+    
+    const p = 6;
+    const w = size - p * 2;
+    const h = size - p * 2;
+
+    if (shape === 'circle') {
+      ctx.arc(size/2, size/2, w/2, 0, Math.PI*2);
+    } else if (shape === 'square') {
+      ctx.rect(p, p, w, h);
+    } else if (shape === 'diamond') {
+      ctx.moveTo(size/2, p);
+      ctx.lineTo(size-p, size/2);
+      ctx.lineTo(size/2, size-p);
+      ctx.lineTo(p, size/2);
+    } else if (shape === 'triangle') {
+      ctx.moveTo(size/2, p);
+      ctx.lineTo(size-p, size-p);
+      ctx.lineTo(p, size-p);
+    }
+    ctx.fill();
+    return ctx.getImageData(0, 0, size, size);
+  }
+
 function initMap() {
   map = new maplibregl.Map({
     container: 'map',
@@ -858,6 +891,11 @@ function initMap() {
 
 
   map.on('load', () => {
+    
+    ['circle', 'square', 'diamond', 'triangle'].forEach(shape => {
+      map.addImage(shape, createShapeImage(shape, 64), { sdf: true });
+    });
+
     map.addSource('incidents', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: getGeoJSONFeatures() },
@@ -886,18 +924,22 @@ function initMap() {
     // Unclustered incidents
     map.addLayer({
       id: 'unclustered-point',
-      type: 'circle',
+      type: 'symbol',
       source: 'incidents',
       filter: ['!', ['has', 'point_count']],
+      layout: {
+        'icon-image': ['get', 'shape'],
+        'icon-size': ['+', 0.15, ['*', 0.02, ['get', 'sev']]],
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true
+      },
       paint: {
-        'circle-radius': ['+', 4, ['*', 0.55, ['get', 'sev']]],
-        'circle-color': ['get', 'color'],
-        'circle-opacity': 1,
-        'circle-stroke-width': ['case', 
-          ['boolean', ['feature-state', 'selected'], false], 2, 
+        'icon-color': ['get', 'color'],
+        'icon-halo-color': '#fff',
+        'icon-halo-width': ['case', 
+          ['boolean', ['feature-state', 'selected'], false], 1.5, 
           0
-        ],
-        'circle-stroke-color': '#fff'
+        ]
       }
     });
 
@@ -1040,6 +1082,7 @@ function getGeoJSONFeatures() {
       sev: i.sev,
       color: heat(i.sev),
       typeLabel: i.typeLabel,
+      shape: TYPES[i.type].shape,
       city: i.city,
       date: i.date,
       type: i.type
