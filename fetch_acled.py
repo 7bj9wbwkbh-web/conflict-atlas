@@ -49,7 +49,7 @@ API_URL = "https://api.acleddata.com/acled/read/"
 
 RETRIES = 3
 RETRY_BACKOFF_SECONDS = 10
-USER_AGENT = "conflict-atlas/2.0 (personal non-commercial project)"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 # =============================================================================
 
@@ -198,8 +198,8 @@ def build_records(acled_rows):
 
 
 def main():
-    email = os.environ.get("ACLED_EMAIL")
-    password = os.environ.get("ACLED_PASSWORD")
+    email = os.environ.get("ACLED_EMAIL", "").strip()
+    password = os.environ.get("ACLED_PASSWORD", "").strip()
     
     if not email or not password:
         raise SystemExit("ACLED_EMAIL and ACLED_PASSWORD environment variables are required.")
