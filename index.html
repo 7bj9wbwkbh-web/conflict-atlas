@@ -438,7 +438,7 @@ header{
     <div class="stats">
       <div class="badge" id="dataBadge" title="This build ships with a fixed sample dataset.">Sample data</div>
       <div class="stat"><b class="num" id="sIncidents">0</b><span>In view</span></div>
-      <div class="stat"><b class="num" id="sCas">0</b><span>Est. deaths</span></div>
+      <div class="stat" id="sCasWrap"><b class="num" id="sCas">0</b><span>Est. deaths</span></div>
       <div class="stat"><b class="num" id="sSev">0.0</b><span>Peak severity</span></div>
     </div>
   </header>
@@ -490,7 +490,10 @@ header{
    </div>
 
    <div id="histBar" role="tabpanel" aria-labelledby="tab-history">
-    <div class="trow">
+    <div id="ribbonWrap">
+      <svg id="ribbon" aria-label="Monthly incident density with draggable range window"></svg>
+    </div>
+    <div class="trow" style="margin-top:7px;margin-bottom:0;">
       <span class="lbl">Time range</span>
       <span class="range-out num" id="rangeOut">—</span>
       <button id="play" aria-pressed="false"><i class="g"></i><span>Play</span></button>
@@ -501,8 +504,6 @@ header{
         <input type="date" id="dTo" min="2020-01-01" max="2025-12-31" aria-label="Range end date">
       </div>
     </div>
-    <div id="ribbonWrap">
-      <svg id="ribbon" aria-label="Monthly incident density with draggable range window"></svg>
     </div>
    </div>
   </section>
@@ -1665,6 +1666,8 @@ function setMode(mode){
     document.getElementById("dataBadge").textContent = HISTORICAL_LABEL;
   }
   document.getElementById("sort").disabled = (mode === "live");
+  const sCasWrap = document.getElementById("sCasWrap");
+  if (sCasWrap) sCasWrap.style.display = (mode === "live") ? "none" : "";
   S.selected = null;
   if (mode === "live"){
     if (!LIVE.seen.size) LIVE.now = 0;
