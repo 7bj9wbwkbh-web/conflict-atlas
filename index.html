@@ -1153,7 +1153,10 @@ function showClusterPopup(leaves, screenX, screenY){
   const sorted = items.sort((a,b) => b.sev - a.sev);
   
   clusterPopup.innerHTML =
-    `<div class="cp-title">${sorted.length} incidents at this location</div>` +
+    `<div class="cp-title" style="display:flex;justify-content:space-between;align-items:center;">
+       <span>${sorted.length} incidents at this location</span>
+       <button id="cpClose" aria-label="Close popup" style="background:none;border:none;color:var(--dimmer);font-size:16px;cursor:pointer;padding:0 4px;line-height:1;">&times;</button>
+     </div>` +
     sorted.map(i => `<button class="cp-item" data-id="${i.id}">
       ${glyph(i.type, heat(i.sev))}
       <span class="cp-name">${i.city}</span>
@@ -1169,6 +1172,9 @@ function showClusterPopup(leaves, screenX, screenY){
   clusterPopup.style.left = left + "px";
   clusterPopup.style.top  = top  + "px";
   clusterPopup.classList.add("on");
+  
+  const closeBtn = clusterPopup.querySelector("#cpClose");
+  if (closeBtn) closeBtn.onclick = (e) => { e.stopPropagation(); hideClusterPopup(); };
   
   clusterPopup.querySelectorAll(".cp-item").forEach(btn =>
     btn.addEventListener("click", e => {
@@ -1476,7 +1482,7 @@ function select(id, fromMap, fromList){
   renderList(); renderDetails(); paintSelection();
   if (i && fromMap){
     const row = listEl.querySelector(`.row[data-id="${i.id}"]`);
-    if (row) row.scrollIntoView({ block:"nearest", behavior:"smooth" });
+    if (row && window.innerWidth > 1000) row.scrollIntoView({ block:"nearest", behavior:"smooth" });
   }
 }
 
