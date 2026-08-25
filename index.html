@@ -1463,7 +1463,7 @@ function renderDetails(){
   detailsEl.querySelector("#dX").onclick = () => select(null);
   detailsEl.querySelector("#dZoom").onclick = () => {
     centerOn(i, 6);
-    setTimeout(() => { markerSig = ""; renderMarkers(true); }, 450);
+    setTimeout(() => { renderMarkers(true); }, 450);
   };
   detailsEl.querySelector("#dNear").onclick = () => {
     stopPlay();
@@ -1685,7 +1685,7 @@ function setMode(mode){
     pauseLive();
     if (!RW) buildRibbon();          // it had no width while hidden
   }
-  markerSig = ""; listSig = ""; detailSig = "";
+  listSig = ""; detailSig = "";
   refresh();
 }
 document.querySelectorAll(".modes button").forEach(b =>
