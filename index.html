@@ -1089,7 +1089,7 @@ function initMap() {
     });
 
     // Initial render
-    renderMarkers();
+    refresh();
     
     // Wire up existing custom zoom buttons
     const zIn = document.getElementById("zIn");
@@ -1780,7 +1780,6 @@ async function boot(){
 
   initMap();
   buildRibbon();
-  refresh();
 }
 boot();
 
