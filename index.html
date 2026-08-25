@@ -569,7 +569,7 @@ const TYPES = {
 };
 
 const TYPE_DEFS = {
-  armed_clash:    "Direct armed engagement between two or more organized forces — state armies, militias, or rebel groups — resulting in confirmed casualties.",
+  armed_clash:    "Direct armed engagement between two or more organized forces — state armies, militias, or rebel groups. Casualties may be unverified or unknown.",
   terror_attack:  "Deliberate targeting of non-combatants, including bombings, massacres, and mass-casualty attacks by armed or terrorist actors.",
   border_dispute: "Military standoff, incursion, or exchange of fire along a contested international or administrative boundary. May not involve large-scale combat.",
   civil_unrest:   "Large-scale protests, riots, or popular uprisings, including cases where security forces used lethal force against demonstrators."
@@ -1408,9 +1408,7 @@ function renderDetails(){
 
   // Detect GDELT / auto-generated descriptions (contain "coded from" filler)
   const isGdelt = i.desc && /coded from/i.test(i.desc);
-  const descHtml = isGdelt
-    ? `<p class="desc gdelt-note">⚠ Machine-matched news event. Description auto-generated from media coverage volume — not a verified incident record.</p>`
-    : (i.desc ? `<p class="desc">${i.desc}</p>` : '');
+  const descHtml = isGdelt ? '' : (i.desc ? `<p class="desc">${i.desc}</p>` : '');
 
   // Type definition tooltip
   const typeDef = TYPE_DEFS[i.type] || '';
