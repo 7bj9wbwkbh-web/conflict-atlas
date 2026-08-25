@@ -895,13 +895,16 @@ let markerHoveredId = null;
       ctx.lineTo(size-p, size/2);
       ctx.lineTo(size/2, size-p);
       ctx.lineTo(p, size/2);
+      ctx.closePath();
     } else if (shape === 'triangle') {
       ctx.moveTo(size/2, p);
       ctx.lineTo(size-p, size-p);
       ctx.lineTo(p, size-p);
+      ctx.closePath();
     }
     ctx.fill();
-    return ctx.getImageData(0, 0, size, size);
+    const imgData = ctx.getImageData(0, 0, size, size);
+    return { width: size, height: size, data: new Uint8Array(imgData.data) };
   }
 
 function initMap() {
@@ -924,7 +927,7 @@ function initMap() {
 
     map.addSource('incidents', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: getGeoJSONFeatures() },
+      data: { type: 'FeatureCollection', features: [] },
       cluster: true,
       clusterMaxZoom: 12, // After zoom 12, features are unclustered
       clusterRadius: 52,
@@ -1380,7 +1383,7 @@ function renderList(){
       <div class="r2"><span class="place">${i.city}</span><span class="ctry">${i.country}</span></div>
       <div class="r3"><span class="type">${i.typeLabel}${i.ongoing?" · ongoing":""}</span>
         ${arrived ? `<span class="ago" data-arrived="${LIVE.arrivals.get(i.id)}">${ago(Date.now()-LIVE.arrivals.get(i.id))}</span>`
-                  : `<span class="cas num">${i.cas ? i.cas.toLocaleString()+" est. deaths" : "no deaths reported"}</span>`}</div>
+                  : `<span class="cas num">${i.cas !== undefined ? i.cas.toLocaleString()+" est. deaths" : "no deaths reported"}</span>`}</div>
       <div class="track"><i style="width:${i.sev*10}%;background:${i.color}"></i></div>
     </button>`; }).join("")
     + (all.length > LIST_CAP
@@ -1436,7 +1439,7 @@ function renderDetails(){
       ${descHtml}
       <dl class="kv">
         <dt>Date</dt><dd class="num">${pretty(i.date)}${i.ongoing ? " → ongoing" : ""}</dd>
-        <dt>Deaths</dt><dd class="num">${i.cas ? "≈ "+i.cas.toLocaleString() : "None reported"}</dd>
+        <dt>Deaths</dt><dd class="num">${i.cas !== undefined ? "≈ "+i.cas.toLocaleString() : "None reported"}</dd>
         <dt>Severity</dt>
         <dd><span class="num" style="color:${i.color}">${i.sev.toFixed(1)} / 10</span>
           <div class="sevbar"><i style="width:${i.sev*10}%;background:${i.color}"></i></div></dd>
@@ -1723,7 +1726,7 @@ function refresh(){
   renderDetails();
   const v = visible();
   document.getElementById("sIncidents").textContent = v.length;
-  document.getElementById("sCas").textContent = v.reduce((s,i)=>s+i.cas,0).toLocaleString();
+  document.getElementById("sCas").textContent = v.reduce((s,i)=>s+(i.cas||0),0).toLocaleString();
   document.getElementById("sSev").textContent = v.length ? Math.max(...v.map(i=>i.sev)).toFixed(1) : "0.0";
 }
 
