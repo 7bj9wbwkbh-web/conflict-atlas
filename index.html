@@ -1659,15 +1659,15 @@ function setMode(mode){
   if (mode === "live"){
     const line = document.getElementById("srcLine");
     if (line) line.innerHTML = USE_REAL_FEED
-      ? 'Source: <b>GDELT</b> — machine-matched news mentions, refreshed periodically. Not a verified incident record.'
+      ? 'Source: <b>ACLED</b> — high-quality, human-curated conflict data, refreshed weekly.'
       : 'Source: <b>Replay</b> — archived records streamed on a simulated clock. No live connection.';
-    document.getElementById("dataBadge").textContent = USE_REAL_FEED ? "GDELT" : "Replay";
+    document.getElementById("dataBadge").textContent = USE_REAL_FEED ? "ACLED" : "Replay";
   } else {
     document.getElementById("dataBadge").textContent = HISTORICAL_LABEL;
   }
   document.getElementById("sort").disabled = (mode === "live");
   const sCasWrap = document.getElementById("sCasWrap");
-  if (sCasWrap) sCasWrap.style.display = (mode === "live") ? "none" : "";
+  if (sCasWrap) sCasWrap.style.display = "";
   S.selected = null;
   if (mode === "live"){
     if (!LIVE.seen.size) LIVE.now = 0;
