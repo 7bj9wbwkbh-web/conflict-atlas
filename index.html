@@ -228,12 +228,30 @@ header{
   border:1px solid var(--line-soft);border-radius:2px;padding:3px 6px}
 .quality{font-family:var(--sans);font-size:9.5px;color:var(--dimmer);line-height:1.5;margin-top:10px;
   border-top:1px solid var(--line-soft);padding-top:9px}
-.btnrow{display:flex;gap:7px;margin-top:12px}
+.btnrow{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}
 .btn{
   font-family:var(--sans);font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;
   border:1px solid var(--line);border-radius:2px;padding:7px 10px;color:var(--dim);
+  text-decoration:none;display:inline-flex;align-items:center;
 }
 .btn:hover{border-color:var(--dim);color:var(--paper);background:var(--panel-3)}
+.btn-news{color:var(--h3);border-color:rgba(230,193,63,.35)}
+.btn-news:hover{border-color:var(--h3);background:rgba(230,193,63,.08);color:var(--h3)}
+/* type definition tooltip icon */
+.type-info{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;border:1px solid var(--dim);
+  font-size:9px;color:var(--dim);cursor:help;margin-left:5px;
+  vertical-align:middle;flex-shrink:0;
+  font-family:var(--sans);font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;
+}
+.type-info:hover{border-color:var(--paper);color:var(--paper)}
+.type-lbl{display:flex;align-items:center;gap:0}
+/* GDELT auto-description warning */
+.gdelt-note{
+  font-size:11px;color:var(--dimmer);font-style:italic;
+  border-left:2px solid rgba(230,193,63,.4);padding-left:8px;margin-bottom:10px;
+}
 
 /* ---------- timeline ---------- */
 #time{
@@ -548,6 +566,13 @@ const TYPES = {
   terror_attack:  { label:"Attack on civilians", weight:1.5, shape:"diamond" },
   border_dispute: { label:"Border dispute",weight:0.7, shape:"square"   },
   civil_unrest:   { label:"Civil unrest",  weight:0.5, shape:"triangle" }
+};
+
+const TYPE_DEFS = {
+  armed_clash:    "Direct armed engagement between two or more organized forces — state armies, militias, or rebel groups — resulting in confirmed casualties.",
+  terror_attack:  "Deliberate targeting of non-combatants, including bombings, massacres, and mass-casualty attacks by armed or terrorist actors.",
+  border_dispute: "Military standoff, incursion, or exchange of fire along a contested international or administrative boundary. May not involve large-scale combat.",
+  civil_unrest:   "Large-scale protests, riots, or popular uprisings, including cases where security forces used lethal force against demonstrators."
 };
 
 const SAMPLE = [
@@ -1380,15 +1405,36 @@ function renderDetails(){
   const i = lookupById(S.selected);
   if (!i){ detailsEl.classList.remove("on"); detailsEl.innerHTML = ""; return; }
   detailsEl.classList.add("on");
+
+  // Detect GDELT / auto-generated descriptions (contain "coded from" filler)
+  const isGdelt = i.desc && /coded from/i.test(i.desc);
+  const descHtml = isGdelt
+    ? `<p class="desc gdelt-note">⚠ Machine-matched news event. Description auto-generated from media coverage volume — not a verified incident record.</p>`
+    : (i.desc ? `<p class="desc">${i.desc}</p>` : '');
+
+  // Type definition tooltip
+  const typeDef = TYPE_DEFS[i.type] || '';
+  const typeLabelHtml = `${i.typeLabel}${i.ongoing ? ' · <span style="color:var(--h3)">Ongoing</span>' : ''}
+    ${typeDef ? `<span class="type-info" title="${typeDef}" aria-label="${typeDef}">ⓘ</span>` : ''}`;
+
+  // Sources — show names as plain labels if no article URL, add search button
+  const newsQuery = encodeURIComponent(`"${i.city}" "${i.country}" conflict ${i.date.slice(0,4)}`);
+  const newsUrl = `https://news.google.com/search?q=${newsQuery}`;
+  const sourcesHtml = i.sources.length
+    ? i.sources.map(s => s.url && !['reuters.com','bbc.com','apnews.com','aljazeera.com','theguardian.com'].some(h => s.url.includes(h))
+        ? `<a href="${s.url}" target="_blank" rel="noopener">${s.name} ↗</a>`
+        : `<span class="src-plain">${s.name}</span>`).join('')
+    : `<span class="src-plain">No sources listed</span>`;
+
   detailsEl.innerHTML = `
     <div class="dhead">
       <button class="x" id="dX" aria-label="Close details">×</button>
-      <div class="lbl">${i.typeLabel}${i.ongoing ? " · Ongoing" : ""}</div>
+      <div class="lbl type-lbl">${typeLabelHtml}</div>
       <h2>${i.city}</h2>
       <div class="where">${i.region !== "—" ? i.region + ", " : ""}${i.country} · ${i.lat.toFixed(2)}°, ${i.lon.toFixed(2)}°</div>
     </div>
     <div class="body">
-      <p class="desc">${i.desc}</p>
+      ${descHtml}
       <dl class="kv">
         <dt>Date</dt><dd class="num">${pretty(i.date)}${i.ongoing ? " → ongoing" : ""}</dd>
         <dt>Deaths</dt><dd class="num">${i.cas ? "≈ "+i.cas.toLocaleString() : "None reported"}</dd>
@@ -1397,30 +1443,24 @@ function renderDetails(){
           <div class="sevbar"><i style="width:${i.sev*10}%;background:${i.color}"></i></div></dd>
         <dt>Tags</dt><dd style="color:var(--dim)">${(i.tags||[]).join(" · ") || "—"}</dd>
       </dl>
-      <div class="lbl" style="margin-bottom:6px">Covered by <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dimmer)">· links to publication homepages</span></div>
-      <div class="srcs">${i.sources.length
-        ? i.sources.map(s => s.url
-            ? `<a href="${s.url}" target="_blank" rel="noopener">${s.name} ↗</a>`
-            : `<span class="src-plain">${s.name}</span>`).join("")
-        : `<span class="src-plain">No sources listed</span>`}</div>
+      <div class="lbl" style="margin-bottom:6px">Sources</div>
+      <div class="srcs">${sourcesHtml}</div>
       <div class="btnrow">
         <button class="btn" id="dZoom">Zoom to location</button>
         <button class="btn" id="dNear">Show ±90 days</button>
+        <a class="btn btn-news" href="${newsUrl}" target="_blank" rel="noopener">Search news ↗</a>
       </div>
       <div class="quality"><b>Data quality:</b> ${QUALITY[i.quality]}</div>
     </div>`;
   detailsEl.querySelector("#dX").onclick = () => select(null);
   detailsEl.querySelector("#dZoom").onclick = () => {
     centerOn(i, 6);
-    // Force markers to repaint after zoom animation completes so selection ring
-    // is visible even if the target got merged into a cluster at the new zoom.
     setTimeout(() => { markerSig = ""; renderMarkers(true); }, 450);
   };
   detailsEl.querySelector("#dNear").onclick = () => {
     stopPlay();
     S.from = Math.max(0, i.day - 90); S.to = Math.min(TOTAL_DAYS, i.day + 90);
     refresh();
-    // Flash the timeline ribbon to signal the range changed
     const ribbon = document.getElementById("ribbonWrap");
     if (ribbon){ ribbon.classList.remove("timeline-flash"); void ribbon.offsetWidth; ribbon.classList.add("timeline-flash"); }
   };
