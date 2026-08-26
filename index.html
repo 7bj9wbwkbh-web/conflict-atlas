@@ -927,7 +927,7 @@ function initMap() {
 
     map.addSource('incidents', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
+      data: { type: 'FeatureCollection', features: getGeoJSONFeatures() },
       cluster: true,
       clusterMaxZoom: 12, // After zoom 12, features are unclustered
       clusterRadius: 52,
@@ -1088,8 +1088,7 @@ function initMap() {
       }
     });
 
-    // Initial render
-    refresh();
+  });
     
     // Wire up existing custom zoom buttons
     const zIn = document.getElementById("zIn");
@@ -1780,6 +1779,7 @@ async function boot(){
 
   initMap();
   buildRibbon();
+  refresh();
 }
 boot();
 

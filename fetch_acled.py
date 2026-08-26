@@ -39,9 +39,9 @@ RECORDS_KEY = "incidents"
 TYPE_MAPPING = {
     "Battles": "armed_clash",
     "Explosions/Remote violence": "armed_clash",
-    "Violence against civilians": "terror_attack",
-    "Protests": "civil_unrest",
-    "Riots": "civil_unrest",
+    "Violence against civilians": "armed_clash",
+    "Protests": "unrest",
+    "Riots": "unrest",
 }
 
 AUTH_URL = "https://acleddata.com/user/login?_format=json"
