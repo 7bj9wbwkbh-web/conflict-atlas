@@ -38,10 +38,10 @@ RECORDS_KEY = "incidents"
 # ACLED event_type to our internal types
 TYPE_MAPPING = {
     "Battles": "armed_clash",
-    "Explosions/Remote violence": "armed_clash",
+    "Explosions/Remote violence": "terror_attack",
     "Violence against civilians": "armed_clash",
-    "Protests": "unrest",
-    "Riots": "unrest",
+    "Protests": "civil_unrest",
+    "Riots": "civil_unrest",
 }
 
 AUTH_URL = "https://acleddata.com/user/login?_format=json"

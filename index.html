@@ -505,7 +505,6 @@ header{
       </div>
     </div>
     </div>
-   </div>
   </section>
 
   <aside id="side">
@@ -566,14 +565,16 @@ const TYPES = {
   armed_clash:    { label:"Armed clash",   weight:1.0, shape:"circle"   },
   terror_attack:  { label:"Attack on civilians", weight:1.5, shape:"diamond" },
   border_dispute: { label:"Border dispute",weight:0.7, shape:"square"   },
-  civil_unrest:   { label:"Civil unrest",  weight:0.5, shape:"triangle" }
+  civil_unrest:   { label:"Civil unrest",  weight:0.5, shape:"triangle" },
+  unrest:         { label:"Civil unrest",  weight:0.5, shape:"triangle" }
 };
 
 const TYPE_DEFS = {
   armed_clash:    "Direct armed engagement between two or more organized forces — state armies, militias, or rebel groups. Casualties may be unverified or unknown.",
   terror_attack:  "Deliberate targeting of non-combatants, including bombings, massacres, and mass-casualty attacks by armed or terrorist actors.",
   border_dispute: "Military standoff, incursion, or exchange of fire along a contested international or administrative boundary. May not involve large-scale combat.",
-  civil_unrest:   "Large-scale protests, riots, or popular uprisings, including cases where security forces used lethal force against demonstrators."
+  civil_unrest:   "Large-scale protests, riots, or popular uprisings, including cases where security forces used lethal force against demonstrators.",
+  unrest:         "Large-scale protests, riots, or popular uprisings, including cases where security forces used lethal force against demonstrators."
 };
 
 const SAMPLE = [
